@@ -1,0 +1,298 @@
+{
+  "metrics": [
+    {
+      "name": "axis_request_duration_seconds",
+      "metric_type": "histogram",
+      "labels": [
+        "flow",
+        "method",
+        "status"
+      ],
+      "description": "Request duration in seconds per flow"
+    },
+    {
+      "name": "axis_request_total",
+      "metric_type": "counter",
+      "labels": [
+        "flow",
+        "method",
+        "status"
+      ],
+      "description": "Total requests per flow"
+    },
+    {
+      "name": "axis_query_duration_seconds",
+      "metric_type": "histogram",
+      "labels": [
+        "source",
+        "index_used"
+      ],
+      "description": "Query duration per source"
+    },
+    {
+      "name": "axis_query_rows_returned",
+      "metric_type": "histogram",
+      "labels": [
+        "source"
+      ],
+      "description": "Number of rows returned per query"
+    },
+    {
+      "name": "axis_call_duration_seconds",
+      "metric_type": "histogram",
+      "labels": [
+        "service",
+        "method",
+        "status"
+      ],
+      "description": "External service call duration"
+    },
+    {
+      "name": "axis_stream_connections",
+      "metric_type": "gauge",
+      "labels": [
+        "stream",
+        "transport"
+      ],
+      "description": "Active stream connections"
+    },
+    {
+      "name": "axis_stream_messages_total",
+      "metric_type": "counter",
+      "labels": [
+        "stream",
+        "direction",
+        "event"
+      ],
+      "description": "Total stream messages sent/received"
+    }
+  ],
+  "trace_schema": {
+    "root_span": {
+      "name": "axis.request",
+      "attributes": [
+        {
+          "key": "flow",
+          "value_type": "string"
+        },
+        {
+          "key": "method",
+          "value_type": "string"
+        },
+        {
+          "key": "path",
+          "value_type": "string"
+        },
+        {
+          "key": "surface",
+          "value_type": "string"
+        },
+        {
+          "key": "auth.user_id",
+          "value_type": "string"
+        },
+        {
+          "key": "tenant",
+          "value_type": "string"
+        },
+        {
+          "key": "response.code",
+          "value_type": "int"
+        }
+      ]
+    },
+    "child_spans": [
+      {
+        "name": "axis.guard",
+        "attributes": [
+          {
+            "key": "guard.name",
+            "value_type": "string"
+          },
+          {
+            "key": "guard.result",
+            "value_type": "string"
+          }
+        ]
+      },
+      {
+        "name": "axis.fetch",
+        "attributes": [
+          {
+            "key": "source",
+            "value_type": "string"
+          },
+          {
+            "key": "result",
+            "value_type": "string"
+          },
+          {
+            "key": "index_used",
+            "value_type": "string"
+          }
+        ]
+      },
+      {
+        "name": "axis.query",
+        "attributes": [
+          {
+            "key": "source",
+            "value_type": "string"
+          },
+          {
+            "key": "rows_returned",
+            "value_type": "int"
+          },
+          {
+            "key": "index_used",
+            "value_type": "string"
+          }
+        ]
+      },
+      {
+        "name": "axis.insert",
+        "attributes": [
+          {
+            "key": "source",
+            "value_type": "string"
+          }
+        ]
+      },
+      {
+        "name": "axis.update",
+        "attributes": [
+          {
+            "key": "source",
+            "value_type": "string"
+          },
+          {
+            "key": "rows_affected",
+            "value_type": "int"
+          }
+        ]
+      },
+      {
+        "name": "axis.delete",
+        "attributes": [
+          {
+            "key": "source",
+            "value_type": "string"
+          },
+          {
+            "key": "rows_affected",
+            "value_type": "int"
+          }
+        ]
+      },
+      {
+        "name": "axis.call",
+        "attributes": [
+          {
+            "key": "service",
+            "value_type": "string"
+          },
+          {
+            "key": "method",
+            "value_type": "string"
+          },
+          {
+            "key": "status",
+            "value_type": "string"
+          }
+        ]
+      }
+    ]
+  },
+  "log_fields": [
+    {
+      "field": "trace_id",
+      "value_type": "string",
+      "source": "generated"
+    },
+    {
+      "field": "flow",
+      "value_type": "string",
+      "source": "request"
+    },
+    {
+      "field": "surface",
+      "value_type": "string",
+      "source": "routing"
+    },
+    {
+      "field": "method",
+      "value_type": "string",
+      "source": "request"
+    },
+    {
+      "field": "path",
+      "value_type": "string",
+      "source": "request"
+    },
+    {
+      "field": "auth.user_id",
+      "value_type": "string",
+      "source": "auth"
+    },
+    {
+      "field": "auth.role",
+      "value_type": "string",
+      "source": "auth"
+    },
+    {
+      "field": "tenant",
+      "value_type": "string",
+      "source": "scope"
+    },
+    {
+      "field": "duration_ms",
+      "value_type": "int",
+      "source": "timing"
+    },
+    {
+      "field": "response.code",
+      "value_type": "int",
+      "source": "response"
+    },
+    {
+      "field": "steps",
+      "value_type": "array",
+      "source": "execution"
+    },
+    {
+      "field": "queries",
+      "value_type": "array",
+      "source": "execution"
+    }
+  ]
+}
+
+# HELP axis_request_duration_seconds Request duration in seconds per flow
+# TYPE axis_request_duration_seconds histogram
+# LABELS: flow, method, status
+
+# HELP axis_request_total Total requests per flow
+# TYPE axis_request_total counter
+# LABELS: flow, method, status
+
+# HELP axis_query_duration_seconds Query duration per source
+# TYPE axis_query_duration_seconds histogram
+# LABELS: source, index_used
+
+# HELP axis_query_rows_returned Number of rows returned per query
+# TYPE axis_query_rows_returned histogram
+# LABELS: source
+
+# HELP axis_call_duration_seconds External service call duration
+# TYPE axis_call_duration_seconds histogram
+# LABELS: service, method, status
+
+# HELP axis_stream_connections Active stream connections
+# TYPE axis_stream_connections gauge
+# LABELS: stream, transport
+
+# HELP axis_stream_messages_total Total stream messages sent/received
+# TYPE axis_stream_messages_total counter
+# LABELS: stream, direction, event
+
+

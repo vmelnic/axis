@@ -1,0 +1,643 @@
+SHAPE AppVersion
+  id UUID PK AUTO
+  version STRING 20 REQUIRED
+  platform ENUM ios android web REQUIRED
+  min_supported STRING 20 REQUIRED
+  recommended STRING 20 REQUIRED
+  force_update BOOL DEFAULT false
+  release_notes TEXT
+  created_at TIMESTAMP AUTO
+
+SHAPE DeepLink
+  id UUID PK AUTO
+  slug STRING 100 REQUIRED UNIQUE
+  type ENUM profile invite chat referral REQUIRED
+  target_id UUID
+  metadata TEXT
+  clicks INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+
+SOURCE app_versions POSTGRES
+  SHAPE AppVersion
+  INDEX platform
+  INDEX version
+
+SOURCE deep_links POSTGRES
+  SHAPE DeepLink
+  INDEX slug UNIQUE
+  INDEX type
+
+SHAPE AuditLog
+  id UUID PK AUTO
+  admin_id UUID REF User.id REQUIRED
+  action STRING 100 REQUIRED
+  entity_type STRING 50 REQUIRED
+  entity_id UUID
+  details TEXT
+  ip_address STRING 45
+  created_at TIMESTAMP AUTO
+
+SOURCE audit_logs POSTGRES
+  SHAPE AuditLog
+  INDEX admin_id
+  INDEX entity_type entity_id
+  INDEX created_at DESC
+
+REALM admin_realm
+  CAPABILITY read users
+  CAPABILITY write users
+  CAPABILITY read badges
+  CAPABILITY write badges
+  CAPABILITY read user_reports
+  CAPABILITY write user_reports
+  CAPABILITY read app_versions
+  CAPABILITY write app_versions
+  CAPABILITY read deep_links
+  CAPABILITY write deep_links
+  CAPABILITY read appointments
+  CAPABILITY read reviews
+  CAPABILITY read subscriptions
+  CAPABILITY write notifications
+  CAPABILITY call push
+  CAPABILITY read audit_logs
+  CAPABILITY write audit_logs
+  CAPABILITY read service_history
+  CAPABILITY read provider_earnings
+  CAPABILITY read payouts
+  CAPABILITY read subscriptions
+  CAPABILITY read conversations
+  CAPABILITY read messages
+
+-- App version check (public, no auth)
+FLOW check_version post /version/check
+  BODY VersionCheck
+    version STRING 20 REQUIRED
+    platform ENUM ios android web REQUIRED
+  LET latest
+    FETCH app_versions
+      FILTER platform EQ body.platform
+    OR 0 "ok"
+  RETURN 200
+    current_version body.version
+    latest_version latest.version
+    min_supported latest.min_supported
+    force_update latest.force_update
+
+-- Deep links (public)
+FLOW resolve_deeplink get /dl/:slug
+  LET link
+    FETCH deep_links
+      FILTER slug EQ path.slug
+    OR 404 "link not found"
+  RETURN 200 link
+
+-- Admin: badge review
+FLOW admin_list_pending_badges get /admin/badges/pending
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  LET pending
+    QUERY badges
+      FILTER status EQ pending
+      SORT created_at ASC
+      PAGE_SIZE 20
+  RETURN 200 pending
+
+FLOW admin_review_badge post /admin/badges/:id/review
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY BadgeReview
+    status ENUM approved rejected REQUIRED
+  LET badge
+    FETCH badges
+      FILTER id EQ path.id
+    OR 404 "badge not found"
+  GUARD is_pending 400 "badge is not pending"
+    EQ badge.status pending
+  UPDATE badges
+    WHERE id EQ path.id
+    SET status body.status
+    SET reviewed_by auth.user_id
+    SET reviewed_at NOW
+  AS updated
+  OR 404
+  MATCH
+    WHEN EQ body.status approved
+      UPDATE users
+        WHERE id EQ badge.user_id
+        SET badge_type badge.badge_type
+        SET badge_status approved
+        SET badge_approved_at NOW
+      AS user_updated
+      OR 404
+      LET notify_title
+        T "push.badge_approved"
+      LET notify_push
+        CALL push.send_notification
+          user_id badge.user_id
+          title notify_title
+          body notify_title
+          data badge.id
+        OR 0 "ok"
+      INSERT notifications
+        user_id badge.user_id
+        type badge_reviewed
+        title notify_title
+        data badge.id
+      AS badge_notif
+    DEFAULT
+      UPDATE users
+        WHERE id EQ badge.user_id
+        SET badge_status rejected
+      AS user_updated
+      OR 404
+      LET notify_title
+        T "push.badge_rejected"
+      LET notify_push
+        null
+      INSERT notifications
+        user_id badge.user_id
+        type badge_reviewed
+        title notify_title
+        data badge.id
+      AS badge_notif
+  RETURN 200 updated
+
+-- Admin: reports
+FLOW admin_list_reports get /admin/reports
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  PARAM status MAYBE ENUM pending reviewed resolved dismissed
+  LET reports
+    QUERY user_reports
+      FILTER status EQ query.status
+      SORT created_at DESC
+      PAGE_SIZE 20
+  RETURN 200 reports
+
+FLOW admin_review_report post /admin/reports/:id/review
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY ReportReview
+    status ENUM pending reviewed resolved dismissed REQUIRED
+    action ENUM no_action warn suspend ban
+  LET report
+    FETCH user_reports
+      FILTER id EQ path.id
+    OR 404 "report not found"
+  UPDATE user_reports
+    WHERE id EQ path.id
+    SET status body.status
+    SET reviewed_by auth.user_id
+    SET reviewed_at NOW
+  AS updated
+  OR 404
+  MATCH
+    WHEN EQ body.action warn
+      UPDATE users
+        WHERE id EQ report.reported_id
+        SET account_status warned
+      AS actioned
+      OR 404
+    WHEN EQ body.action suspend
+      UPDATE users
+        WHERE id EQ report.reported_id
+        SET account_status suspended
+      AS actioned
+      OR 404
+    WHEN EQ body.action ban
+      UPDATE users
+        WHERE id EQ report.reported_id
+        SET account_status banned
+      AS actioned
+      OR 404
+    DEFAULT
+      LET actioned
+        null
+  RETURN 200 updated
+
+-- Admin: user management
+FLOW admin_get_user get /admin/users/:id
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  LET user
+    FETCH users
+      FILTER id EQ path.id
+    OR 404 "user not found"
+  RETURN 200 user
+
+FLOW admin_update_user_status put /admin/users/:id/status
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY UserStatusUpdate
+    account_status ENUM active warned suspended banned REQUIRED
+  UPDATE users
+    WHERE id EQ path.id
+    SET account_status body.account_status
+  AS updated
+  OR 404 "user not found"
+  RETURN 200 updated
+
+-- Admin: app versions
+FLOW admin_create_version post /admin/versions
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY CreateVersion
+    version STRING 20 REQUIRED
+    platform ENUM ios android web REQUIRED
+    min_supported STRING 20 REQUIRED
+    recommended STRING 20 REQUIRED
+    force_update BOOL
+    release_notes TEXT
+  INSERT app_versions
+    version body.version
+    platform body.platform
+    min_supported body.min_supported
+    recommended body.recommended
+    force_update body.force_update
+    release_notes body.release_notes
+  AS created
+  RETURN 201 created
+
+FLOW admin_list_versions get /admin/versions
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  LET versions
+    QUERY app_versions
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 versions
+
+FLOW admin_update_version put /admin/versions/:id
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY UpdateVersion
+    min_supported STRING 20
+    recommended STRING 20
+    force_update BOOL
+    release_notes TEXT
+  UPDATE app_versions
+    WHERE id EQ path.id
+    SET min_supported body.min_supported
+    SET recommended body.recommended
+    SET force_update body.force_update
+    SET release_notes body.release_notes
+  AS updated
+  OR 404 "version not found"
+  RETURN 200 updated
+
+-- Admin: deep links
+FLOW admin_create_deeplink post /admin/deeplinks
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  BODY CreateDeepLink
+    slug STRING 100 REQUIRED
+    type ENUM profile invite chat referral REQUIRED
+    target_id UUID
+    metadata TEXT
+  INSERT deep_links
+    slug body.slug
+    type body.type
+    target_id body.target_id
+    metadata body.metadata
+  AS created
+  RETURN 201 created
+
+FLOW admin_list_deeplinks get /admin/deeplinks
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  LET links
+    QUERY deep_links
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 links
+
+FLOW admin_delete_deeplink delete /admin/deeplinks/:id
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  DELETE deep_links
+    WHERE id EQ path.id
+  OR 404 "deep link not found"
+  RETURN 204
+
+-- Admin: user search
+FLOW admin_list_users get /admin/users
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  PARAM status MAYBE ENUM active suspended deleted
+  PARAM account_status MAYBE ENUM active warned suspended banned
+  LET users
+    QUERY users
+      FILTER status EQ query.status
+      FILTER account_status EQ query.account_status
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 users
+
+-- Admin: audit log
+FLOW admin_list_audit_log get /admin/audit
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  PARAM entity_type MAYBE STRING 50
+  LET logs
+    QUERY audit_logs
+      FILTER entity_type EQ query.entity_type
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 logs
+
+-- Admin: dashboard metrics
+FLOW admin_dashboard get /admin/dashboard
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  CACHE 60 VARY auth.user_id
+  LET total_users
+    QUERY users
+      PAGE_SIZE 1
+  LET active_users
+    QUERY users
+      FILTER status EQ active
+      PAGE_SIZE 1
+  LET suspended_users
+    QUERY users
+      FILTER account_status EQ suspended
+      PAGE_SIZE 1
+  LET pending_badges
+    QUERY badges
+      FILTER status EQ pending
+      PAGE_SIZE 1
+  LET pending_reports
+    QUERY user_reports
+      FILTER status EQ pending
+      PAGE_SIZE 1
+  LET active_subs
+    QUERY subscriptions
+      FILTER status EQ active
+      PAGE_SIZE 1
+  RETURN 200
+    total_users total_users.total
+    active_users active_users.total
+    suspended_users suspended_users.total
+    pending_badges pending_badges.total
+    pending_reports pending_reports.total
+    active_subscriptions active_subs.total
+
+FLOW admin_recent_activity get /admin/activity
+  REALM admin_realm
+  AUTH session
+  RULE must_be_admin
+    REQUIRE auth.is_admin EQ true
+  LET recent_users
+    QUERY users
+      SORT created_at DESC
+      PAGE_SIZE 10
+  LET recent_reports
+    QUERY user_reports
+      SORT created_at DESC
+      PAGE_SIZE 10
+  LET recent_badges
+    QUERY badges
+      SORT created_at DESC
+      PAGE_SIZE 10
+  RETURN 200
+    recent_users recent_users
+    recent_reports recent_reports
+    recent_badges recent_badges
+
+-- Health check (public)
+FLOW health get /health
+  RETURN 200
+    status "ok"
+    service "helperbook"
+
+SURFACE api v1
+  REALM auth_realm
+  BASE_PATH /api/v1
+
+  -- Public
+  ROUTE GET /health -> health
+  ROUTE POST /version/check -> check_version
+  ROUTE GET /dl/:slug -> resolve_deeplink
+
+  -- Auth
+  ROUTE POST /auth/otp/request -> request_otp
+  ROUTE POST /auth/otp/verify -> verify_otp
+  ROUTE POST /auth/otp/email/request -> request_email_otp
+  ROUTE POST /auth/otp/email/verify -> verify_email_otp
+  ROUTE POST /auth/social/google -> google_login
+  ROUTE POST /auth/social/apple -> apple_login
+  ROUTE POST /auth/social/linkedin -> linkedin_login
+  ROUTE POST /auth/social/meta -> meta_login
+  ROUTE GET /auth/me -> get_me
+  ROUTE PUT /auth/profile -> update_profile
+  ROUTE POST /auth/logout -> logout
+  ROUTE GET /auth/sessions -> list_sessions
+  ROUTE delete /auth/sessions/:id -> terminate_session
+  ROUTE POST /auth/sessions/terminate-all -> terminate_all_sessions
+  ROUTE POST /auth/session/refresh -> refresh_session
+  ROUTE POST /auth/totp/setup -> totp_setup
+  ROUTE POST /auth/totp/enable -> totp_enable
+  ROUTE POST /auth/totp/disable -> totp_disable
+  ROUTE POST /auth/verify/phone -> request_phone_verify
+  ROUTE POST /auth/verify/phone/confirm -> confirm_phone_verify
+  ROUTE POST /auth/verify/email -> request_email_verify
+  ROUTE POST /auth/verify/email/confirm -> confirm_email_verify
+  ROUTE POST /auth/account/delete -> delete_account
+
+  -- Webhooks
+  ROUTE POST /webhooks/stripe/checkout -> stripe_checkout_completed
+  ROUTE POST /webhooks/stripe/cancel -> stripe_subscription_cancelled
+  ROUTE POST /webhooks/stripe/fail -> stripe_payment_failed
+  ROUTE POST /webhooks/:provider -> webhook_receiver
+
+  -- Network & discovery
+  ROUTE GET /categories -> list_categories
+  ROUTE GET /categories/:id -> get_category
+  ROUTE GET /my/services -> list_my_services
+  ROUTE POST /my/services -> add_service
+  ROUTE PUT /my/services/:id -> update_service
+  ROUTE delete /my/services/:id -> delete_service
+  ROUTE GET /network -> browse_network
+  ROUTE GET /network/search -> search_network
+  ROUTE GET /network/nearby -> nearby_providers
+  ROUTE POST /network/geocode -> geocode_address
+  ROUTE POST /network/distance -> distance_to
+  ROUTE GET /profile/:slug -> get_profile
+  ROUTE GET /profile/:user_id/services -> get_user_services
+  ROUTE GET /profile/:user_id/gallery -> get_public_gallery
+
+  -- Connections
+  ROUTE GET /connections -> list_connections
+  ROUTE POST /connections -> send_connection_request
+  ROUTE GET /connections/incoming -> list_incoming_requests
+  ROUTE PUT /connections/:id -> respond_connection
+  ROUTE delete /connections/:id -> remove_connection
+
+  -- Contacts
+  ROUTE POST /contacts/:contact_id/favorite -> add_favorite
+  ROUTE delete /contacts/:contact_id/favorite -> remove_favorite
+  ROUTE PUT /contacts/:contact_id/note -> upsert_note
+  ROUTE GET /contacts/:contact_id/note -> get_note
+  ROUTE GET /folders -> list_folders
+  ROUTE POST /folders -> create_folder
+  ROUTE PUT /folders/:id -> update_folder
+  ROUTE delete /folders/:id -> delete_folder
+  ROUTE POST /folders/:id/members -> add_to_folder
+  ROUTE delete /folders/:folder_id/members/:contact_id -> remove_from_folder
+
+  -- Conversations & messaging
+  ROUTE GET /conversations -> list_conversations
+  ROUTE POST /conversations -> start_conversation
+  ROUTE POST /conversations/group -> create_group
+  ROUTE PUT /conversations/:id/group -> update_group
+  ROUTE POST /conversations/:id/members -> add_group_member
+  ROUTE delete /conversations/:conv_id/members/:user_id -> remove_group_member
+  ROUTE POST /conversations/:id/leave -> leave_group
+  ROUTE POST /conversations/:id/messages -> send_message
+  ROUTE POST /conversations/:id/attachment -> upload_attachment
+  ROUTE GET /conversations/:id/messages -> list_messages
+  ROUTE POST /conversations/:id/read -> mark_read
+  ROUTE POST /conversations/:id/archive -> archive_conversation
+  ROUTE POST /conversations/:id/unarchive -> unarchive_conversation
+  ROUTE POST /conversations/:id/suggest -> suggest_replies
+  ROUTE POST /conversations/:id/summarize -> summarize_conversation
+  ROUTE GET /conversations/:id/search -> search_messages
+  ROUTE PUT /messages/:id -> edit_message
+  ROUTE delete /messages/:id -> delete_message
+  ROUTE POST /messages/:id/translate -> translate_message
+
+  -- Templates
+  ROUTE GET /templates -> list_templates
+  ROUTE POST /templates -> create_template
+  ROUTE PUT /templates/:id -> update_template
+  ROUTE delete /templates/:id -> delete_template
+
+  -- Scheduling
+  ROUTE GET /provider/onboarding -> get_onboarding_status
+  ROUTE POST /provider/onboarding -> start_onboarding
+  ROUTE POST /provider/onboarding/advance -> advance_onboarding
+  ROUTE GET /provider/profile -> get_provider_profile
+  ROUTE PUT /provider/profile -> upsert_provider_profile
+  ROUTE GET /provider/availability -> list_availability
+  ROUTE POST /provider/availability -> set_availability
+  ROUTE delete /provider/availability/:id -> delete_availability
+  ROUTE PUT /provider/status -> set_status
+  ROUTE GET /provider/status -> get_status
+  ROUTE GET /providers/:user_id/availability -> get_public_availability
+  ROUTE GET /providers/:user_id/status -> get_public_status
+  ROUTE GET /appointments -> list_appointments
+  ROUTE POST /appointments -> propose_appointment
+  ROUTE GET /appointments/:id -> get_appointment
+  ROUTE POST /appointments/:id/confirm -> confirm_appointment
+  ROUTE POST /appointments/:id/dismiss -> dismiss_appointment
+  ROUTE POST /appointments/:id/cancel -> cancel_appointment
+  ROUTE POST /appointments/:id/start -> start_appointment
+  ROUTE POST /appointments/:id/complete -> complete_appointment
+  ROUTE POST /appointments/:id/no-show -> mark_no_show
+  ROUTE POST /appointments/:id/calendar -> sync_appointment_to_calendar
+  ROUTE delete /appointments/:id/calendar -> remove_from_calendar
+  ROUTE POST /calendar/connect -> connect_calendar
+  ROUTE delete /calendar/:provider -> disconnect_calendar
+  ROUTE GET /calendar/status -> get_calendar_status
+
+  -- Reviews & reputation
+  ROUTE POST /reviews -> create_review
+  ROUTE GET /reviews/:user_id -> list_reviews
+  ROUTE POST /reviews/:id/respond -> respond_review
+  ROUTE POST /badges/id-check -> request_id_check
+  ROUTE POST /badges/document/selfie -> upload_badge_selfie
+  ROUTE POST /badges/document/id-front -> upload_badge_id_front
+  ROUTE POST /badges/document/id-back -> upload_badge_id_back
+  ROUTE GET /badges/status -> get_badge_status
+  ROUTE POST /disputes -> open_dispute
+  ROUTE PUT /disputes/:id -> counter_dispute
+  ROUTE POST /disputes/:id/resolve -> resolve_dispute
+  ROUTE GET /disputes -> list_disputes
+  ROUTE POST /reports -> submit_report
+
+  -- Commerce
+  ROUTE GET /subscription -> get_subscription
+  ROUTE POST /subscription/checkout -> create_checkout
+  ROUTE POST /subscription/activate -> activate_subscription
+  ROUTE POST /subscription/cancel -> cancel_subscription
+  ROUTE GET /billing -> list_billing
+  ROUTE GET /history -> list_service_history
+  ROUTE POST /history -> record_service
+  ROUTE GET /referral -> get_referral_info
+  ROUTE POST /referral/apply -> apply_referral
+
+  -- Finance
+  ROUTE GET /earnings -> get_earnings
+  ROUTE GET /earnings/summary -> get_earnings_summary
+  ROUTE GET /payout-methods -> list_payout_methods
+  ROUTE POST /payout-methods -> add_payout_method
+  ROUTE PUT /payout-methods/:id -> update_payout_method
+  ROUTE delete /payout-methods/:id -> delete_payout_method
+  ROUTE POST /payouts -> request_payout
+  ROUTE GET /payouts -> list_payouts
+  ROUTE GET /payouts/:id -> get_payout
+
+  -- Settings
+  ROUTE GET /settings -> get_settings
+  ROUTE PUT /settings -> update_settings
+  ROUTE GET /blocked -> list_blocked
+  ROUTE POST /blocked -> block_user
+  ROUTE delete /blocked/:user_id -> unblock_user
+  ROUTE GET /notifications -> list_notifications
+  ROUTE POST /notifications/:id/read -> mark_notification_read
+  ROUTE POST /notifications/read-all -> mark_all_read
+  ROUTE GET /notifications/unread-count -> unread_count
+  ROUTE POST /devices -> register_device
+  ROUTE delete /devices/:id -> unregister_device
+  ROUTE POST /avatar/upload -> upload_avatar
+  ROUTE GET /gallery -> list_gallery
+  ROUTE POST /gallery -> add_gallery_image
+  ROUTE POST /gallery/upload -> upload_gallery_image
+  ROUTE delete /gallery/:id -> delete_gallery_image
+
+  -- Admin
+  ROUTE GET /admin/badges/pending -> admin_list_pending_badges
+  ROUTE POST /admin/badges/:id/review -> admin_review_badge
+  ROUTE GET /admin/reports -> admin_list_reports
+  ROUTE POST /admin/reports/:id/review -> admin_review_report
+  ROUTE GET /admin/users -> admin_list_users
+  ROUTE GET /admin/users/:id -> admin_get_user
+  ROUTE PUT /admin/users/:id/status -> admin_update_user_status
+  ROUTE POST /admin/versions -> admin_create_version
+  ROUTE GET /admin/versions -> admin_list_versions
+  ROUTE PUT /admin/versions/:id -> admin_update_version
+  ROUTE POST /admin/deeplinks -> admin_create_deeplink
+  ROUTE GET /admin/deeplinks -> admin_list_deeplinks
+  ROUTE delete /admin/deeplinks/:id -> admin_delete_deeplink
+  ROUTE GET /admin/audit -> admin_list_audit_log
+  ROUTE GET /admin/dashboard -> admin_dashboard
+  ROUTE GET /admin/activity -> admin_recent_activity

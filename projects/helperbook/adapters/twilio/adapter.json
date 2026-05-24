@@ -1,0 +1,23 @@
+{
+  "name": "twilio",
+  "version": "0.1.0",
+  "description": "SMS OTP delivery via Twilio Verify API",
+  "service": "sms",
+  "methods": ["send_otp"],
+  "provider": "twilio",
+  "config": {
+    "account_sid": { "env": "TWILIO_ACCOUNT_SID", "required": true },
+    "auth_token": { "env": "TWILIO_AUTH_TOKEN", "required": true, "secret": true },
+    "verify_service_sid": { "env": "TWILIO_VERIFY_SID", "required": true },
+    "from_number": { "env": "TWILIO_FROM_NUMBER", "required": false }
+  },
+  "endpoints": {
+    "send_otp": {
+      "method": "POST",
+      "url": "https://verify.twilio.com/v2/Services/${TWILIO_VERIFY_SID}/Verifications",
+      "input": { "phone": "string" },
+      "output": { "code": "string", "success": "bool" }
+    }
+  },
+  "hot_swap": true
+}

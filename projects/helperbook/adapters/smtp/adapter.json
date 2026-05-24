@@ -1,0 +1,25 @@
+{
+  "name": "smtp",
+  "version": "0.1.0",
+  "description": "Direct SMTP email delivery — works with any SMTP server",
+  "service": "email",
+  "methods": ["send"],
+  "provider": "smtp",
+  "config": {
+    "host": { "env": "SMTP_HOST", "required": true },
+    "port": { "env": "SMTP_PORT", "required": false, "default": "587" },
+    "username": { "env": "SMTP_USERNAME", "required": true },
+    "password": { "env": "SMTP_PASSWORD", "required": true, "secret": true },
+    "from_email": { "env": "SMTP_FROM_EMAIL", "required": true },
+    "from_name": { "env": "SMTP_FROM_NAME", "required": false, "default": "Helperbook" },
+    "tls": { "env": "SMTP_TLS", "required": false, "default": "true" }
+  },
+  "endpoints": {
+    "send": {
+      "method": "local",
+      "input": { "to": "string", "subject": "string", "body": "string", "html": "bool" },
+      "output": { "success": "bool", "message_id": "string" }
+    }
+  },
+  "hot_swap": true
+}

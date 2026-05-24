@@ -1,0 +1,257 @@
+-- Provider earnings, payouts and commission tracking
+
+SHAPE ProviderEarnings
+  id UUID PK AUTO
+  provider_id UUID REF User.id REQUIRED
+  appointment_id UUID REF Appointment.id REQUIRED
+  service_history_id UUID REF ServiceHistory.id REQUIRED
+  gross_amount DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  commission_rate DECIMAL PRECISION 5 SCALE 4 DEFAULT 0.10
+  commission_amount DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  net_amount DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  currency ENUM EUR MDL USD DEFAULT EUR
+  status ENUM pending available paid_out DEFAULT pending
+  available_at TIMESTAMP
+  paid_out_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+
+SHAPE PayoutMethod
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  type ENUM bank_transfer paypal stripe_connect DEFAULT bank_transfer
+  details TEXT REQUIRED
+  is_default BOOL DEFAULT false
+  verified BOOL DEFAULT false
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Payout
+  id UUID PK AUTO
+  provider_id UUID REF User.id REQUIRED
+  payout_method_id UUID REF PayoutMethod.id REQUIRED
+  amount DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  currency ENUM EUR MDL USD DEFAULT EUR
+  status ENUM requested processing completed failed DEFAULT requested
+  reference STRING 255
+  failure_reason TEXT
+  requested_at TIMESTAMP AUTO
+  processed_at TIMESTAMP
+  completed_at TIMESTAMP
+
+SHAPE CommissionRule
+  id UUID PK AUTO
+  name STRING 100 REQUIRED
+  rate DECIMAL PRECISION 5 SCALE 4 REQUIRED
+  min_amount DECIMAL PRECISION 10 SCALE 2
+  max_amount DECIMAL PRECISION 10 SCALE 2
+  category_id UUID REF ServiceCategory.id
+  is_active BOOL DEFAULT true
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE provider_earnings POSTGRES
+  SHAPE ProviderEarnings
+  INDEX provider_id
+  INDEX appointment_id
+  INDEX service_history_id
+  INDEX status
+  INDEX provider_id status
+  INDEX created_at DESC
+
+SOURCE payout_methods POSTGRES
+  SHAPE PayoutMethod
+  INDEX user_id
+  INDEX user_id is_default
+
+SOURCE payouts POSTGRES
+  SHAPE Payout
+  INDEX provider_id
+  INDEX status
+  INDEX provider_id status
+  INDEX requested_at DESC
+
+SOURCE commission_rules POSTGRES
+  SHAPE CommissionRule
+  INDEX is_active
+  INDEX category_id
+
+REALM finance_realm
+  TENANT user_id
+  CAPABILITY read provider_earnings
+  CAPABILITY write provider_earnings
+  CAPABILITY read payout_methods
+  CAPABILITY write payout_methods
+  CAPABILITY read payouts
+  CAPABILITY write payouts
+  CAPABILITY read commission_rules
+  CAPABILITY read users
+  CAPABILITY read service_history
+  CAPABILITY read appointments
+  CAPABILITY write notifications
+
+-- Earnings dashboard
+FLOW get_earnings get /earnings
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM status MAYBE ENUM pending available paid_out
+  LET earnings
+    QUERY provider_earnings
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ query.status
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 earnings
+
+FLOW get_earnings_summary get /earnings/summary
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET all_earnings
+    QUERY provider_earnings
+      FILTER provider_id EQ auth.user_id
+      PAGE_SIZE 10000
+  LET available
+    QUERY provider_earnings
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ available
+      PAGE_SIZE 10000
+  LET paid_out
+    QUERY provider_earnings
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ paid_out
+      PAGE_SIZE 10000
+  RETURN 200
+    total_earned all_earnings.total
+    available_balance available.total
+    total_paid_out paid_out.total
+
+-- Payout methods
+FLOW list_payout_methods get /payout-methods
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET methods
+    QUERY payout_methods
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 10
+  RETURN 200 methods
+
+FLOW add_payout_method post /payout-methods
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY AddPayoutMethod
+    type ENUM bank_transfer paypal stripe_connect REQUIRED
+    details TEXT REQUIRED
+    is_default BOOL
+  INSERT payout_methods
+    user_id auth.user_id
+    type body.type
+    details body.details
+    is_default body.is_default
+  AS method
+  RETURN 201 method
+
+FLOW update_payout_method put /payout-methods/:id
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdatePayoutMethod
+    details TEXT
+    is_default BOOL
+  LET method
+    FETCH payout_methods
+      FILTER id EQ path.id
+    OR 404 "payout method not found"
+  GUARD ownership 403 "not your payout method"
+    EQ method.user_id auth.user_id
+  UPDATE payout_methods
+    WHERE id EQ path.id
+    SET details body.details
+    SET is_default body.is_default
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW delete_payout_method delete /payout-methods/:id
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET method
+    FETCH payout_methods
+      FILTER id EQ path.id
+    OR 404 "payout method not found"
+  GUARD ownership 403 "not your payout method"
+    EQ method.user_id auth.user_id
+  DELETE payout_methods
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- Payouts
+FLOW request_payout post /payouts
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 3 per_day per_user
+  BODY RequestPayout
+    amount DECIMAL REQUIRED
+    currency ENUM EUR MDL USD
+    payout_method_id UUID REQUIRED
+  LET method
+    FETCH payout_methods
+      FILTER id EQ body.payout_method_id
+    OR 404 "payout method not found"
+  GUARD method_ownership 403 "not your payout method"
+    EQ method.user_id auth.user_id
+  GUARD method_verified 400 "payout method not verified"
+    EQ method.verified true
+  LET available
+    QUERY provider_earnings
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ available
+      PAGE_SIZE 10000
+  GUARD has_balance 400 "insufficient balance"
+    GTE available.total 1
+  INSERT payouts
+    provider_id auth.user_id
+    payout_method_id body.payout_method_id
+    amount body.amount
+    currency body.currency
+    status requested
+  AS payout
+  LET payout_title
+    T "finance.payout_requested"
+  INSERT notifications
+    user_id auth.user_id
+    type service_completed
+    title payout_title
+  AS payout_notif
+  RETURN 201 payout
+
+FLOW list_payouts get /payouts
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM status MAYBE ENUM requested processing completed failed
+  LET payouts
+    QUERY payouts
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ query.status
+      SORT requested_at DESC
+      PAGE_SIZE 50
+  RETURN 200 payouts
+
+FLOW get_payout get /payouts/:id
+  REALM finance_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET payout
+    FETCH payouts
+      FILTER id EQ path.id
+    OR 404 "payout not found"
+  GUARD ownership 403 "not your payout"
+    EQ payout.provider_id auth.user_id
+  RETURN 200 payout

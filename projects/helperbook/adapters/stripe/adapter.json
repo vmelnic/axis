@@ -1,0 +1,28 @@
+{
+  "name": "stripe",
+  "version": "0.1.0",
+  "description": "Payment processing via Stripe Checkout + Subscriptions",
+  "service": "payment",
+  "methods": ["create_checkout", "verify_receipt"],
+  "provider": "stripe",
+  "config": {
+    "secret_key": { "env": "STRIPE_SECRET_KEY", "required": true, "secret": true },
+    "webhook_secret": { "env": "STRIPE_WEBHOOK_SECRET", "required": true, "secret": true },
+    "price_id_plus": { "env": "STRIPE_PRICE_ID_PLUS", "required": true }
+  },
+  "endpoints": {
+    "create_checkout": {
+      "method": "POST",
+      "url": "https://api.stripe.com/v1/checkout/sessions",
+      "input": { "user_id": "uuid", "plan": "string", "return_url": "string" },
+      "output": { "checkout_url": "string", "session_id": "string" }
+    },
+    "verify_receipt": {
+      "method": "GET",
+      "url": "https://api.stripe.com/v1/checkout/sessions/${receipt_data}",
+      "input": { "provider": "string", "receipt_data": "string" },
+      "output": { "valid": "bool", "plan": "string", "expires_at": "string" }
+    }
+  },
+  "hot_swap": true
+}

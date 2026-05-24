@@ -1,0 +1,38 @@
+{
+  "email": {
+    "welcome": {
+      "greeting": "Bine ai venit pe Helperbook, {{name}}!",
+      "body": "Te-ai alaturat unei comunitati de profesionisti si clienti. Descopera servicii in apropierea ta.",
+      "footer": "Primesti acest email pentru ca te-ai inregistrat pe helperbook.app"
+    },
+    "otp": {
+      "title": "Codul tau de verificare",
+      "message": "Foloseste codul de mai jos pentru verificare:",
+      "expiry_note": "Acest cod expira in {{minutes}} minute."
+    }
+  },
+  "push": {
+    "appointment_reminder": "Reminder: {{service}} cu {{provider}} la {{time}}",
+    "new_message": "Mesaj nou de la {{sender}}",
+    "connection_request": "{{name}} vrea sa se conecteze cu tine",
+    "review_received": "Recenzie noua de {{rating}} stele primita",
+    "badge_approved": "Verificarea identitatii tale a fost aprobata!",
+    "badge_rejected": "Verificarea identitatii tale nu a fost aprobata"
+  },
+  "sms": {
+    "otp": "Codul tau Helperbook este {{code}}. Expira in {{minutes}} min."
+  },
+  "commerce": {
+    "subscription": {
+      "plus_monthly": "Helperbook Plus - Lunar",
+      "cancelled": "Abonamentul tau a fost anulat",
+      "payment_failed": "Plata pentru abonament a esuat"
+    }
+  },
+  "common": {
+    "app_name": "Helperbook",
+    "greeting": "Salut, {{name}}",
+    "error": "Ceva nu a mers bine. Te rugam sa incerci din nou.",
+    "message_deleted": "Acest mesaj a fost sters"
+  }
+}

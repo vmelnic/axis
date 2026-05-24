@@ -1,0 +1,130 @@
+SHAPE User
+  id UUID PK AUTO
+  email STRING 255 REQUIRED UNIQUE
+  name STRING 100 REQUIRED
+  host_status ENUM active inactive DEFAULT inactive
+  email_verified BOOL DEFAULT FALSE
+  account_status ENUM active suspended banned DEFAULT active
+  created_at TIMESTAMP AUTO
+
+SHAPE Listing
+  id UUID PK AUTO
+  host_id UUID REF User.id REQUIRED
+  title STRING 200 REQUIRED
+  price_per_night DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  max_guests INT MIN 1 MAX 16 REQUIRED
+  weekly_discount BOOL DEFAULT FALSE
+  status ENUM active paused deleted REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE Booking
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  listing_id UUID REF Listing.id REQUIRED
+  check_in DATE REQUIRED
+  check_out DATE REQUIRED
+  status ENUM pending confirmed cancelled completed REQUIRED
+  total_price DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  guest_count INT MIN 1 MAX 16 DEFAULT 1
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE users POSTGRES
+  SHAPE User
+  INDEX email UNIQUE
+  INDEX id
+
+SOURCE listings POSTGRES
+  SHAPE Listing
+  INDEX host_id
+  INDEX status
+
+SOURCE bookings POSTGRES
+  SHAPE Booking
+  INDEX user_id created_at DESC
+  INDEX listing_id check_in check_out
+  INDEX status
+
+REALM booking_api
+  TENANT user_id
+  CAPABILITY read users
+  CAPABILITY read listings
+  CAPABILITY read bookings
+  CAPABILITY write bookings
+  CAPABILITY effect email
+
+FLOW get_booking get /bookings/:id
+  REALM booking_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET booking
+    FETCH bookings
+      FILTER id EQ path.id
+    OR 404
+  GUARD ownership 403 "not your booking"
+    EQ booking.user_id auth.user_id
+  RETURN 200 booking
+
+FLOW list_bookings get /bookings
+  REALM booking_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM page_size INT DEFAULT 20 MIN 1 MAX 100
+  PARAM status MAYBE ENUM pending confirmed cancelled completed
+  LET bookings
+    QUERY bookings
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE query.page_size
+  RETURN 200 bookings
+
+FLOW create_booking post /bookings
+  REALM booking_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 5 per_minute per_user
+  BODY BookingCreate
+    listing_id UUID REQUIRED
+    check_in DATE REQUIRED
+    check_out DATE REQUIRED
+    guest_count INT MIN 1 MAX 16 DEFAULT 1
+  RULE user_may_book
+    REQUIRE auth.email_verified EQ TRUE
+    REQUIRE auth.account_status EQ active
+  GUARD valid_dates 400 "check_out must be after check_in"
+    GT body.check_out body.check_in
+  GUARD no_overlap 409 "dates are unavailable"
+    EMPTY
+      QUERY bookings
+        FILTER listing_id EQ body.listing_id
+        FILTER status IN pending
+        FILTER check_in LT body.check_out
+        FILTER check_out GT body.check_in
+  LET listing
+    FETCH listings
+      FILTER id EQ body.listing_id
+    OR 404 "listing not found"
+  GUARD host_active 400 "host is not active"
+    EQ listing.host_status active
+  GUARD guest_capacity 400 "exceeds max guests"
+    LTE body.guest_count listing.max_guests
+  LET nights
+    DAYS_BETWEEN body.check_in body.check_out
+  LET nights_decimal
+    TO_DECIMAL nights
+  LET total
+    MUL listing.price_per_night nights_decimal
+  INSERT bookings
+    user_id auth.user_id
+    listing_id body.listing_id
+    check_in body.check_in
+    check_out body.check_out
+    status pending
+    total_price total
+    guest_count body.guest_count
+  AS booking
+  EFFECT email
+    TEMPLATE booking_request
+    TO listing.host_id
+    DATA booking
+  RETURN 201 booking

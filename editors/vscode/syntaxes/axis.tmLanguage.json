@@ -1,0 +1,80 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Axis",
+  "scopeName": "source.axis",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#construct-header" },
+    { "include": "#flow-keywords" },
+    { "include": "#body-keywords" },
+    { "include": "#type-keywords" },
+    { "include": "#modifier-keywords" },
+    { "include": "#operator-keywords" },
+    { "include": "#constant" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#shape-name" },
+    { "include": "#path" },
+    { "include": "#dotted-ref" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "--.*$",
+      "name": "comment.line.double-dash.axis"
+    },
+    "construct-header": {
+      "match": "^(SHAPE|SOURCE|FLOW|SAGA|REALM|POLICY|SERVICE|SURFACE|MIGRATE)\\b",
+      "name": "keyword.declaration.axis"
+    },
+    "flow-keywords": {
+      "match": "\\b(AUTH|SCOPE|LIMIT|CACHE|BODY|PARAM|HEADER|LET|GUARD|RULE|MATCH|CASE|RETURN|INSERT|UPDATE|DELETE|EFFECT|FETCH|QUERY|FILTER|SORT|PAGE_SIZE|OR|REQUIRE|VERIFY|YIELD|COMPENSATE|STEP|ON_FAILURE|ON_SUCCESS|RUN_COMPENSATIONS|CALL|WHERE|SET|AS)\\b",
+      "name": "keyword.control.axis"
+    },
+    "body-keywords": {
+      "match": "\\b(INDEX|SHAPE|TENANT|CAPABILITY|APPLIES_TO|ENDPOINT|METHOD|INPUT|OUTPUT|TIMEOUT|RETRY|BACKOFF|ROUTE|EXPOSE|FIELD|HIDE|BASE_PATH|COPY|ADD|DROP|RENAME|TO|TEMPLATE|DATA|VARY|NONE)\\b",
+      "name": "keyword.other.axis"
+    },
+    "type-keywords": {
+      "match": "\\b(UUID|BOOL|DATE|TIMESTAMP|TEXT|STRING|INT|DECIMAL|ENUM|REF|JSON|LIST|MAP|MAYBE)\\b",
+      "name": "storage.type.axis"
+    },
+    "modifier-keywords": {
+      "match": "\\b(PK|AUTO|REQUIRED|UNIQUE|DEFAULT|MIN|MAX|PRECISION|SCALE|PER_MINUTE|PER_HOUR|PER_USER|PER_IP|DESC|ASC)\\b",
+      "name": "storage.modifier.axis"
+    },
+    "operator-keywords": {
+      "match": "\\b(EQ|NEQ|GT|GTE|LT|LTE|IN|NOT_IN|CONTAINS|STARTS_WITH|ENDS_WITH|AND|OR_OP|EMPTY|EXISTS|BETWEEN|LIKE|NOT_LIKE|IS_NULL|IS_NOT_NULL|DAYS_BETWEEN|TO_DECIMAL|MUL|ADD_OP|SUB|DIV|MOD|CONCAT|COALESCE|COUNT|SUM|AVG|MIN_AGG|MAX_AGG)\\b",
+      "name": "keyword.operator.axis"
+    },
+    "constant": {
+      "match": "\\b(TRUE|FALSE|NOW|NONE|POSTGRES|REDIS|WEBHOOK)\\b",
+      "name": "constant.language.axis"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.axis"
+    },
+    "number": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.axis"
+    },
+    "shape-name": {
+      "match": "\\b[A-Z][a-zA-Z0-9]+\\b",
+      "name": "entity.name.type.axis"
+    },
+    "path": {
+      "match": "/[a-zA-Z0-9_/:]+",
+      "name": "string.unquoted.path.axis"
+    },
+    "dotted-ref": {
+      "match": "\\b(auth|body|path|query|header)\\.[a-zA-Z_][a-zA-Z0-9_]*\\b",
+      "name": "variable.other.member.axis"
+    },
+    "identifier": {
+      "match": "\\b[a-z_][a-z0-9_]*\\b",
+      "name": "variable.other.axis"
+    }
+  }
+}

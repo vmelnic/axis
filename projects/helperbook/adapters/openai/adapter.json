@@ -1,0 +1,47 @@
+{
+  "name": "openai",
+  "version": "0.1.0",
+  "description": "AI capabilities via OpenAI API — moderation, translation, summarization, embeddings",
+  "service": "openai",
+  "methods": ["moderate", "translate", "summarize", "suggest_replies", "embed"],
+  "provider": "openai",
+  "config": {
+    "api_key": { "env": "OPENAI_API_KEY", "required": true, "secret": true },
+    "model": { "env": "OPENAI_MODEL", "required": false, "default": "gpt-4o-mini" },
+    "moderation_model": { "env": "OPENAI_MODERATION_MODEL", "required": false, "default": "omni-moderation-latest" },
+    "embedding_model": { "env": "OPENAI_EMBEDDING_MODEL", "required": false, "default": "text-embedding-3-small" }
+  },
+  "endpoints": {
+    "moderate": {
+      "method": "POST",
+      "url": "https://api.openai.com/v1/moderations",
+      "input": { "text": "string" },
+      "output": { "flagged": "bool", "categories": "string" }
+    },
+    "translate": {
+      "method": "POST",
+      "url": "https://api.openai.com/v1/chat/completions",
+      "input": { "text": "string", "target_lang": "string" },
+      "output": { "translated": "string" }
+    },
+    "summarize": {
+      "method": "POST",
+      "url": "https://api.openai.com/v1/chat/completions",
+      "input": { "text": "string", "max_sentences": "int" },
+      "output": { "summary": "string" }
+    },
+    "suggest_replies": {
+      "method": "POST",
+      "url": "https://api.openai.com/v1/chat/completions",
+      "input": { "context": "string", "role": "string" },
+      "output": { "suggestions": "string" }
+    },
+    "embed": {
+      "method": "POST",
+      "url": "https://api.openai.com/v1/embeddings",
+      "input": { "text": "string" },
+      "output": { "embedding": "string", "dimensions": "int" }
+    }
+  },
+  "hot_swap": true
+}

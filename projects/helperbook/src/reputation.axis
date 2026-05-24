@@ -1,0 +1,443 @@
+SHAPE Review
+  id UUID PK AUTO
+  appointment_id UUID REF Appointment.id REQUIRED
+  reviewer_id UUID REF User.id REQUIRED
+  reviewee_id UUID REF User.id REQUIRED
+  rating INT REQUIRED
+  content TEXT
+  tags TEXT
+  photos TEXT
+  response TEXT
+  response_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Badge
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  badge_type ENUM id_check verified REQUIRED
+  status ENUM pending approved rejected DEFAULT pending
+  selfie_url STRING 500
+  id_front_url STRING 500
+  id_back_url STRING 500
+  match_score DECIMAL PRECISION 5 SCALE 2
+  reviewed_by UUID REF User.id
+  reviewed_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Dispute
+  id UUID PK AUTO
+  appointment_id UUID REF Appointment.id REQUIRED
+  opened_by UUID REF User.id REQUIRED
+  reason TEXT REQUIRED
+  proposed_amount DECIMAL PRECISION 10 SCALE 2
+  counter_amount DECIMAL PRECISION 10 SCALE 2
+  status ENUM open resolved expired DEFAULT open
+  resolution TEXT
+  resolved_at TIMESTAMP
+  expires_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE UserReport
+  id UUID PK AUTO
+  reporter_id UUID REF User.id REQUIRED
+  reported_id UUID REF User.id REQUIRED
+  reason ENUM inappropriate fake harassment no_show scam spam other REQUIRED
+  description TEXT
+  evidence TEXT
+  status ENUM pending reviewed resolved dismissed DEFAULT pending
+  reviewed_by UUID REF User.id
+  reviewed_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+
+SOURCE reviews POSTGRES
+  SHAPE Review
+  INDEX reviewee_id
+  INDEX reviewer_id
+  INDEX appointment_id reviewer_id UNIQUE
+  INDEX reviewee_id rating
+
+SOURCE badges POSTGRES
+  SHAPE Badge
+  INDEX user_id
+  INDEX status
+  INDEX badge_type status
+
+SOURCE disputes POSTGRES
+  SHAPE Dispute
+  INDEX appointment_id
+  INDEX opened_by
+  INDEX status
+
+SOURCE user_reports POSTGRES
+  SHAPE UserReport
+  INDEX reported_id
+  INDEX reporter_id
+  INDEX status
+
+SERVICE ai_moderation
+  ENDPOINT OPENAI_SERVICE_URL
+  AUTH bearer VAULT OPENAI_API_KEY
+  METHOD moderate
+    INPUT text TEXT
+    OUTPUT flagged BOOL
+    OUTPUT categories TEXT
+    TIMEOUT 5s
+    RETRY 1 BACKOFF exponential
+
+REALM reputation_realm
+  TENANT user_id
+  CAPABILITY read reviews
+  CAPABILITY write reviews
+  CAPABILITY read badges
+  CAPABILITY write badges
+  CAPABILITY read disputes
+  CAPABILITY write disputes
+  CAPABILITY read user_reports
+  CAPABILITY write user_reports
+  CAPABILITY read appointments
+  CAPABILITY read users
+  CAPABILITY write notifications
+  CAPABILITY call ai_moderation
+  CAPABILITY call push
+
+-- Reviews
+FLOW create_review post /reviews
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY CreateReview
+    appointment_id UUID REQUIRED
+    reviewee_id UUID REQUIRED
+    rating INT REQUIRED
+    content TEXT
+    tags TEXT
+    photos TEXT
+  GUARD valid_rating_min 400 "rating must be 1-5"
+    GTE body.rating 1
+  GUARD valid_rating_max 400 "rating must be 1-5"
+    LTE body.rating 5
+  GUARD not_self 400 "cannot review yourself"
+    NEQ body.reviewee_id auth.user_id
+  LET appointment
+    FETCH appointments
+      FILTER id EQ body.appointment_id
+    OR 404 "appointment not found"
+  GUARD is_completed 400 "appointment must be completed"
+    EQ appointment.status completed
+  LET moderation
+    CALL ai_moderation.moderate
+      text body.content
+    OR 0 "ok"
+  INSERT reviews
+    appointment_id body.appointment_id
+    reviewer_id auth.user_id
+    reviewee_id body.reviewee_id
+    rating body.rating
+    content body.content
+    tags body.tags
+    photos body.photos
+  AS review
+  LET review_title
+    T "push.review_received" rating body.rating
+  LET review_push
+    CALL push.send_notification
+      user_id body.reviewee_id
+      title review_title
+      body body.content
+      data review.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id body.reviewee_id
+    type review_received
+    title review_title
+    body body.content
+    data review.id
+  AS review_notif
+  RETURN 201 review
+
+FLOW list_reviews get /reviews/:user_id
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET user_reviews
+    QUERY reviews
+      FILTER reviewee_id EQ path.user_id
+      SORT created_at DESC
+      PAGE_SIZE 20
+  RETURN 200 user_reviews
+
+FLOW respond_review post /reviews/:id/respond
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY ReviewResponse
+    response TEXT REQUIRED
+  LET review
+    FETCH reviews
+      FILTER id EQ path.id
+    OR 404 "review not found"
+  GUARD is_reviewee 403 "only the reviewed user can respond"
+    EQ review.reviewee_id auth.user_id
+  GUARD no_existing_response 400 "already responded"
+    EQ review.response null
+  UPDATE reviews
+    WHERE id EQ path.id
+    SET response body.response
+    SET response_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Badges
+FLOW request_id_check post /badges/id-check
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY IdCheckRequest
+    selfie_url STRING 500 REQUIRED
+    id_front_url STRING 500 REQUIRED
+    id_back_url STRING 500
+  LET existing
+    FETCH badges
+      FILTER user_id EQ auth.user_id
+      FILTER badge_type EQ id_check
+    OR 0 "ok"
+  GUARD no_pending 400 "you already have a pending request"
+    EQ existing null
+  INSERT badges
+    user_id auth.user_id
+    badge_type id_check
+    status pending
+    selfie_url body.selfie_url
+    id_front_url body.id_front_url
+    id_back_url body.id_back_url
+  AS badge
+  RETURN 201 badge
+
+FLOW upload_badge_selfie post /badges/document/selfie
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY BadgeSelfieUpload
+    file TEXT REQUIRED
+  UPLOAD body.file -> badge_documents AS doc_url
+  LET existing
+    FETCH badges
+      FILTER user_id EQ auth.user_id
+      FILTER badge_type EQ id_check
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE badges
+        WHERE id EQ existing.id
+        SET selfie_url doc_url
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT badges
+        user_id auth.user_id
+        badge_type id_check
+        status pending
+        selfie_url doc_url
+      AS updated
+  RETURN 200
+    url doc_url
+
+FLOW upload_badge_id_front post /badges/document/id-front
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY BadgeIdFrontUpload
+    file TEXT REQUIRED
+  UPLOAD body.file -> badge_documents AS doc_url
+  LET existing
+    FETCH badges
+      FILTER user_id EQ auth.user_id
+      FILTER badge_type EQ id_check
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE badges
+        WHERE id EQ existing.id
+        SET id_front_url doc_url
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT badges
+        user_id auth.user_id
+        badge_type id_check
+        status pending
+        id_front_url doc_url
+      AS updated
+  RETURN 200
+    url doc_url
+
+FLOW upload_badge_id_back post /badges/document/id-back
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY BadgeIdBackUpload
+    file TEXT REQUIRED
+  UPLOAD body.file -> badge_documents AS doc_url
+  LET existing
+    FETCH badges
+      FILTER user_id EQ auth.user_id
+      FILTER badge_type EQ id_check
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE badges
+        WHERE id EQ existing.id
+        SET id_back_url doc_url
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT badges
+        user_id auth.user_id
+        badge_type id_check
+        status pending
+        id_back_url doc_url
+      AS updated
+  RETURN 200
+    url doc_url
+
+FLOW get_badge_status get /badges/status
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET id_check
+    FETCH badges
+      FILTER user_id EQ auth.user_id
+      FILTER badge_type EQ id_check
+    OR 0 "ok"
+  RETURN 200
+    id_check id_check
+
+-- Disputes
+FLOW open_dispute post /disputes
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 5 per_day per_user
+  BODY OpenDispute
+    appointment_id UUID REQUIRED
+    reason TEXT REQUIRED
+    proposed_amount DECIMAL
+  LET appointment
+    FETCH appointments
+      FILTER id EQ body.appointment_id
+    OR 404 "appointment not found"
+  GUARD is_completed 400 "can only dispute completed appointments"
+    EQ appointment.status completed
+  INSERT disputes
+    appointment_id body.appointment_id
+    opened_by auth.user_id
+    reason body.reason
+    proposed_amount body.proposed_amount
+    status open
+    expires_at NOW_PLUS 7 days
+  AS dispute
+  RETURN 201 dispute
+
+FLOW counter_dispute put /disputes/:id
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY CounterDispute
+    counter_amount DECIMAL REQUIRED
+  LET dispute
+    FETCH disputes
+      FILTER id EQ path.id
+    OR 404 "dispute not found"
+  GUARD is_open 400 "dispute is not open"
+    EQ dispute.status open
+  LET appointment
+    FETCH appointments
+      FILTER id EQ dispute.appointment_id
+    OR 404 "appointment not found"
+  GUARD is_party 403 "not a party to this dispute"
+    OR
+      EQ appointment.client_id auth.user_id
+      EQ appointment.provider_id auth.user_id
+  UPDATE disputes
+    WHERE id EQ path.id
+    SET counter_amount body.counter_amount
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW resolve_dispute post /disputes/:id/resolve
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY ResolveDispute
+    resolution TEXT REQUIRED
+  LET dispute
+    FETCH disputes
+      FILTER id EQ path.id
+    OR 404 "dispute not found"
+  GUARD is_open 400 "dispute is not open"
+    EQ dispute.status open
+  LET appointment
+    FETCH appointments
+      FILTER id EQ dispute.appointment_id
+    OR 404 "appointment not found"
+  GUARD is_party 403 "not a party to this dispute"
+    OR
+      EQ appointment.client_id auth.user_id
+      EQ appointment.provider_id auth.user_id
+  UPDATE disputes
+    WHERE id EQ path.id
+    SET status resolved
+    SET resolution body.resolution
+    SET resolved_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW list_disputes get /disputes
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM status MAYBE ENUM open resolved expired
+  LET disputes
+    QUERY disputes
+      FILTER opened_by EQ auth.user_id
+      FILTER status EQ query.status
+      SORT created_at DESC
+      PAGE_SIZE 20
+  RETURN 200 disputes
+
+-- Reports
+FLOW submit_report post /reports
+  REALM reputation_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 5 per_day per_user
+  BODY SubmitReport
+    reported_id UUID REQUIRED
+    reason ENUM inappropriate fake harassment no_show scam spam other REQUIRED
+    description TEXT
+    evidence TEXT
+  GUARD not_self 400 "cannot report yourself"
+    NEQ body.reported_id auth.user_id
+  LET report_moderation
+    CALL ai_moderation.moderate
+      text body.description
+    OR 0 "ok"
+  INSERT user_reports
+    reporter_id auth.user_id
+    reported_id body.reported_id
+    reason body.reason
+    description body.description
+    evidence body.evidence
+    status pending
+  AS report
+  RETURN 201 report

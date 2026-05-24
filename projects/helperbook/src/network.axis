@@ -1,0 +1,689 @@
+SHAPE ServiceCategory
+  id UUID PK AUTO
+  name STRING 100 REQUIRED
+  slug STRING 100 REQUIRED UNIQUE
+  icon STRING 50
+  parent_id UUID REF ServiceCategory.id
+  sort_order INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE UserService
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  category_id UUID REF ServiceCategory.id REQUIRED
+  service_name STRING 200
+  rate_type ENUM hourly fixed negotiable DEFAULT negotiable
+  rate_amount DECIMAL PRECISION 10 SCALE 2
+  currency ENUM EUR MDL USD DEFAULT EUR
+  price_min DECIMAL PRECISION 10 SCALE 2
+  price_max DECIMAL PRECISION 10 SCALE 2
+  description TEXT
+  is_active BOOL DEFAULT true
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Connection
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  contact_id UUID REF User.id REQUIRED
+  status ENUM pending accepted rejected blocked DEFAULT pending
+  message TEXT
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ContactFavorite
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  contact_id UUID REF User.id REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE ContactNote
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  contact_id UUID REF User.id REQUIRED
+  note TEXT REQUIRED
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ContactFolder
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  name STRING 100 REQUIRED
+  sort_order INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+
+SHAPE ContactFolderMember
+  id UUID PK AUTO
+  folder_id UUID REF ContactFolder.id REQUIRED
+  contact_id UUID REF User.id REQUIRED
+
+SOURCE service_categories POSTGRES
+  SHAPE ServiceCategory
+  INDEX slug UNIQUE
+  INDEX parent_id
+
+SOURCE user_services POSTGRES
+  SHAPE UserService
+  INDEX user_id
+  INDEX category_id
+  INDEX user_id category_id UNIQUE
+
+SOURCE connections POSTGRES
+  SHAPE Connection
+  INDEX user_id
+  INDEX contact_id
+  INDEX user_id contact_id UNIQUE
+  INDEX status
+
+SOURCE contact_favorites POSTGRES
+  SHAPE ContactFavorite
+  INDEX user_id
+
+SOURCE contact_notes POSTGRES
+  SHAPE ContactNote
+  INDEX user_id
+  INDEX user_id contact_id UNIQUE
+
+SOURCE contact_folders POSTGRES
+  SHAPE ContactFolder
+  INDEX user_id
+
+SOURCE contact_folder_members POSTGRES
+  SHAPE ContactFolderMember
+  INDEX folder_id
+
+SERVICE geo
+  ENDPOINT GEO_SERVICE_URL
+  AUTH bearer VAULT NOMINATIM_USER_AGENT
+  METHOD geocode
+    INPUT address STRING 500
+    OUTPUT lat DECIMAL
+    OUTPUT lng DECIMAL
+    OUTPUT formatted_address STRING 500
+    TIMEOUT 5s
+  METHOD reverse_geocode
+    INPUT lat DECIMAL
+    INPUT lng DECIMAL
+    OUTPUT address STRING 500
+    OUTPUT city STRING 100
+    OUTPUT country STRING 100
+    TIMEOUT 5s
+  METHOD distance
+    INPUT lat1 DECIMAL
+    INPUT lng1 DECIMAL
+    INPUT lat2 DECIMAL
+    INPUT lng2 DECIMAL
+    OUTPUT meters INT
+    OUTPUT duration_seconds INT
+    TIMEOUT 5s
+
+SERVICE search_providers
+  ENDPOINT SEARCH_SERVICE_URL
+  AUTH bearer VAULT MEILISEARCH_API_KEY
+  METHOD search
+    INPUT index_name STRING 50
+    INPUT query STRING 500
+    INPUT filters TEXT
+    INPUT limit INT
+    OUTPUT hits TEXT
+    OUTPUT total INT
+    TIMEOUT 5s
+  METHOD index
+    INPUT index_name STRING 50
+    INPUT document_id STRING 100
+    INPUT body TEXT
+    OUTPUT task_id INT
+    OUTPUT success BOOL
+    TIMEOUT 5s
+  METHOD remove
+    INPUT index_name STRING 50
+    INPUT document_id STRING 100
+    OUTPUT task_id INT
+    OUTPUT success BOOL
+    TIMEOUT 5s
+
+REALM network_realm
+  TENANT user_id
+  CAPABILITY read users
+  CAPABILITY read service_categories
+  CAPABILITY read user_services
+  CAPABILITY write user_services
+  CAPABILITY read connections
+  CAPABILITY write connections
+  CAPABILITY read contact_favorites
+  CAPABILITY write contact_favorites
+  CAPABILITY read contact_notes
+  CAPABILITY write contact_notes
+  CAPABILITY read contact_folders
+  CAPABILITY write contact_folders
+  CAPABILITY read contact_folder_members
+  CAPABILITY write contact_folder_members
+  CAPABILITY write notifications
+  CAPABILITY call geo
+  CAPABILITY call search_providers
+  CAPABILITY call push
+
+-- Service categories (read-only, system-defined)
+FLOW list_categories get /categories
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  CACHE 300
+  LET categories
+    QUERY service_categories
+      SORT sort_order ASC
+      PAGE_SIZE 200
+  RETURN 200 categories
+
+FLOW get_category get /categories/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET category
+    FETCH service_categories
+      FILTER id EQ path.id
+    OR 404 "category not found"
+  RETURN 200 category
+
+-- Provider services
+FLOW list_my_services get /my/services
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET services
+    QUERY user_services
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 services
+
+FLOW add_service post /my/services
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 per_minute per_user
+  BODY AddService
+    category_id UUID REQUIRED
+    service_name STRING 200
+    rate_type ENUM hourly fixed negotiable REQUIRED
+    rate_amount DECIMAL
+    currency ENUM EUR MDL USD
+    price_min DECIMAL
+    price_max DECIMAL
+    description TEXT
+  LET category
+    FETCH service_categories
+      FILTER id EQ body.category_id
+    OR 404 "category not found"
+  INSERT user_services
+    user_id auth.user_id
+    category_id body.category_id
+    service_name body.service_name
+    rate_type body.rate_type
+    rate_amount body.rate_amount
+    currency body.currency
+    price_min body.price_min
+    price_max body.price_max
+    description body.description
+  AS service
+  LET index_result
+    CALL search_providers.index
+      index_name "providers"
+      document_id service.id
+      body body.description
+    OR 0 "ok"
+  RETURN 201 service
+
+FLOW update_service put /my/services/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateService
+    rate_type ENUM hourly fixed negotiable
+    rate_amount DECIMAL
+    currency ENUM EUR MDL USD
+    price_min DECIMAL
+    price_max DECIMAL
+    description TEXT
+    is_active BOOL
+  LET service
+    FETCH user_services
+      FILTER id EQ path.id
+    OR 404 "service not found"
+  GUARD ownership 403 "not your service"
+    EQ service.user_id auth.user_id
+  UPDATE user_services
+    WHERE id EQ path.id
+    SET rate_type body.rate_type
+    SET rate_amount body.rate_amount
+    SET currency body.currency
+    SET price_min body.price_min
+    SET price_max body.price_max
+    SET description body.description
+    SET is_active body.is_active
+  AS updated
+  OR 404
+  LET reindex
+    CALL search_providers.index
+      index_name "providers"
+      document_id path.id
+      body body.description
+    OR 0 "ok"
+  RETURN 200 updated
+
+FLOW delete_service delete /my/services/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET service
+    FETCH user_services
+      FILTER id EQ path.id
+    OR 404 "service not found"
+  GUARD ownership 403 "not your service"
+    EQ service.user_id auth.user_id
+  DELETE user_services
+    WHERE id EQ path.id
+  OR 404
+  LET deindex
+    CALL search_providers.remove
+      index_name "providers"
+      document_id path.id
+    OR 0 "ok"
+  RETURN 204
+
+-- Connections
+FLOW send_connection_request post /connections
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 5 per_day per_user
+  BODY ConnectionRequest
+    contact_id UUID REQUIRED
+    message TEXT
+  GUARD not_self 400 "cannot connect to yourself"
+    NEQ body.contact_id auth.user_id
+  LET target
+    FETCH users
+      FILTER id EQ body.contact_id
+    OR 404 "user not found"
+  GUARD target_active 400 "user is not active"
+    EQ target.status active
+  INSERT connections
+    user_id auth.user_id
+    contact_id body.contact_id
+    status pending
+    message body.message
+  AS connection
+  LET conn_title
+    T "push.connection_request" name auth.user_id
+  LET conn_push
+    CALL push.send_notification
+      user_id body.contact_id
+      title conn_title
+      body body.message
+      data connection.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id body.contact_id
+    type connection_request
+    title conn_title
+    body body.message
+    data connection.id
+  AS conn_notif
+  RETURN 201 connection
+
+FLOW list_connections get /connections
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM status MAYBE ENUM pending accepted rejected blocked
+  LET connections
+    QUERY connections
+      FILTER user_id EQ auth.user_id
+      FILTER status EQ query.status
+      SORT updated_at DESC
+      PAGE_SIZE 50
+  RETURN 200 connections
+
+FLOW list_incoming_requests get /connections/incoming
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET requests
+    QUERY connections
+      FILTER contact_id EQ auth.user_id
+      FILTER status EQ pending
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 requests
+
+FLOW respond_connection put /connections/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY ConnectionResponse
+    status ENUM pending accepted rejected blocked REQUIRED
+  LET connection
+    FETCH connections
+      FILTER id EQ path.id
+    OR 404 "connection not found"
+  GUARD is_recipient 403 "not your request"
+    EQ connection.contact_id auth.user_id
+  GUARD is_pending 400 "request is not pending"
+    EQ connection.status pending
+  UPDATE connections
+    WHERE id EQ path.id
+    SET status body.status
+  AS updated
+  OR 404
+  MATCH
+    WHEN EQ body.status accepted
+      LET accept_title
+        T "push.connection_request" name auth.user_id
+      LET accept_push
+        CALL push.send_notification
+          user_id connection.user_id
+          title accept_title
+          body accept_title
+          data connection.id
+        OR 0 "ok"
+      INSERT notifications
+        user_id connection.user_id
+        type connection_accepted
+        title accept_title
+        data connection.id
+      AS accept_notif
+    DEFAULT
+      LET accept_title
+        null
+      LET accept_push
+        null
+      LET accept_notif
+        null
+  RETURN 200 updated
+
+FLOW remove_connection delete /connections/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET connection
+    FETCH connections
+      FILTER id EQ path.id
+    OR 404 "connection not found"
+  GUARD is_participant 403 "not your connection"
+    EQ connection.user_id auth.user_id
+  DELETE connections
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- Favorites
+FLOW add_favorite post /contacts/:contact_id/favorite
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  INSERT contact_favorites
+    user_id auth.user_id
+    contact_id path.contact_id
+  AS fav
+  RETURN 201 fav
+
+FLOW remove_favorite delete /contacts/:contact_id/favorite
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  DELETE contact_favorites
+    WHERE user_id EQ auth.user_id
+    WHERE contact_id EQ path.contact_id
+  OR 404
+  RETURN 204
+
+-- Contact notes
+FLOW upsert_note put /contacts/:contact_id/note
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY NoteBody
+    note TEXT REQUIRED
+  LET existing
+    FETCH contact_notes
+      FILTER user_id EQ auth.user_id
+      FILTER contact_id EQ path.contact_id
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE contact_notes
+        WHERE id EQ existing.id
+        SET note body.note
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT contact_notes
+        user_id auth.user_id
+        contact_id path.contact_id
+        note body.note
+      AS updated
+  RETURN 200 updated
+
+FLOW get_note get /contacts/:contact_id/note
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET note
+    FETCH contact_notes
+      FILTER user_id EQ auth.user_id
+      FILTER contact_id EQ path.contact_id
+    OR 404 "no note"
+  RETURN 200 note
+
+-- Contact folders
+FLOW list_folders get /folders
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET folders
+    QUERY contact_folders
+      FILTER user_id EQ auth.user_id
+      SORT sort_order ASC
+      PAGE_SIZE 50
+  RETURN 200 folders
+
+FLOW create_folder post /folders
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY CreateFolder
+    name STRING 100 REQUIRED
+  INSERT contact_folders
+    user_id auth.user_id
+    name body.name
+  AS folder
+  RETURN 201 folder
+
+FLOW update_folder put /folders/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateFolder
+    name STRING 100
+    sort_order INT
+  LET folder
+    FETCH contact_folders
+      FILTER id EQ path.id
+    OR 404 "folder not found"
+  GUARD ownership 403 "not your folder"
+    EQ folder.user_id auth.user_id
+  UPDATE contact_folders
+    WHERE id EQ path.id
+    SET name body.name
+    SET sort_order body.sort_order
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW delete_folder delete /folders/:id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET folder
+    FETCH contact_folders
+      FILTER id EQ path.id
+    OR 404 "folder not found"
+  GUARD ownership 403 "not your folder"
+    EQ folder.user_id auth.user_id
+  DELETE contact_folders
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+FLOW add_to_folder post /folders/:id/members
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY FolderMember
+    contact_id UUID REQUIRED
+  LET folder
+    FETCH contact_folders
+      FILTER id EQ path.id
+    OR 404 "folder not found"
+  GUARD ownership 403 "not your folder"
+    EQ folder.user_id auth.user_id
+  INSERT contact_folder_members
+    folder_id path.id
+    contact_id body.contact_id
+  AS member
+  RETURN 201 member
+
+FLOW remove_from_folder delete /folders/:folder_id/members/:contact_id
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET folder
+    FETCH contact_folders
+      FILTER id EQ path.folder_id
+    OR 404 "folder not found"
+  GUARD ownership 403 "not your folder"
+    EQ folder.user_id auth.user_id
+  DELETE contact_folder_members
+    WHERE folder_id EQ path.folder_id
+    WHERE contact_id EQ path.contact_id
+  OR 404
+  RETURN 204
+
+-- Search providers (full-text)
+FLOW search_network get /network/search
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 30 per_minute per_user
+  PARAM q STRING 500 REQUIRED
+  PARAM category_id MAYBE UUID
+  PARAM min_rating MAYBE INT
+  PARAM max_price MAYBE DECIMAL
+  LET results
+    CALL search_providers.search
+      index_name "providers"
+      query query.q
+      filters query.category_id
+      limit 20
+    OR 502 "search service unavailable"
+  RETURN 200 results
+
+-- Nearby providers (geo proximity)
+FLOW nearby_providers get /network/nearby
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 per_minute per_user
+  PARAM lat DECIMAL REQUIRED
+  PARAM lng DECIMAL REQUIRED
+  PARAM radius_km MAYBE INT
+  PARAM category_id MAYBE UUID
+  LET providers
+    QUERY users
+      FILTER status EQ active
+      FILTER is_provider EQ true
+      SORT last_seen DESC
+      PAGE_SIZE 20
+  RETURN 200 providers
+
+-- Geocode address for profile
+FLOW geocode_address post /network/geocode
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_minute per_user
+  BODY GeocodeRequest
+    address STRING 500 REQUIRED
+  LET result
+    CALL geo.geocode
+      address body.address
+    OR 502 "geocoding service unavailable"
+  RETURN 200 result
+
+-- Distance to provider
+FLOW distance_to post /network/distance
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 30 per_minute per_user
+  BODY DistanceRequest
+    provider_id UUID REQUIRED
+  LET me
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404 "user not found"
+  LET provider
+    FETCH users
+      FILTER id EQ body.provider_id
+    OR 404 "provider not found"
+  LET dist
+    CALL geo.distance
+      lat1 me.location_lat
+      lng1 me.location_lng
+      lat2 provider.location_lat
+      lng2 provider.location_lng
+    OR 502 "distance service unavailable"
+  RETURN 200 dist
+
+-- Network discovery
+FLOW browse_network get /network
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 50 per_day per_user
+  PARAM category_id MAYBE UUID
+  PARAM role MAYBE ENUM client provider both
+  LET providers
+    QUERY users
+      FILTER status EQ active
+      FILTER role EQ query.role
+      SORT last_seen DESC
+      PAGE_SIZE 20
+  RETURN 200 providers
+
+FLOW get_profile get /profile/:slug
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET user
+    FETCH users
+      FILTER slug EQ path.slug
+    OR 404 "profile not found"
+  GUARD is_active 404 "profile not found"
+    EQ user.status active
+  RETURN 200 user
+
+FLOW get_user_services get /profile/:user_id/services
+  REALM network_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET services
+    QUERY user_services
+      FILTER user_id EQ path.user_id
+      FILTER is_active EQ true
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 services

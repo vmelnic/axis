@@ -1,0 +1,1138 @@
+POST /version/check check_version
+  FETCH app_versions -> latest (or 0)
+  RETURN 200
+GET /dl/:slug resolve_deeplink
+  FETCH deep_links -> link (or 404)
+  RETURN 200
+GET /admin/badges/pending admin_list_pending_badges
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY badges -> pending
+  RETURN 200
+POST /admin/badges/:id/review admin_review_badge
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH badges -> badge (or 404)
+  GUARD is_pending 400 "badge is not pending"
+  UPDATE badges -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.status" }, right: Path { value: "approved" } }
+      UPDATE users
+      COMPUTE notify_title
+      COMPUTE notify_push
+      INSERT notifications
+    DEFAULT
+      UPDATE users
+      Discriminant(4)
+      Discriminant(4)
+      INSERT notifications
+  RETURN 200
+GET /admin/reports admin_list_reports
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY user_reports -> reports
+  RETURN 200
+POST /admin/reports/:id/review admin_review_report
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH user_reports -> report (or 404)
+  UPDATE user_reports -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "warn" } }
+      UPDATE users
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "suspend" } }
+      UPDATE users
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "ban" } }
+      UPDATE users
+    DEFAULT
+      Discriminant(4)
+  RETURN 200
+GET /admin/users/:id admin_get_user
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH users -> user (or 404)
+  RETURN 200
+PUT /admin/users/:id/status admin_update_user_status
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  UPDATE users -> updated
+  RETURN 200
+POST /admin/versions admin_create_version
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  INSERT app_versions -> created
+  RETURN 201
+GET /admin/versions admin_list_versions
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY app_versions -> versions
+  RETURN 200
+PUT /admin/versions/:id admin_update_version
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  UPDATE app_versions -> updated
+  RETURN 200
+POST /admin/deeplinks admin_create_deeplink
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  INSERT deep_links -> created
+  RETURN 201
+GET /admin/deeplinks admin_list_deeplinks
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY deep_links -> links
+  RETURN 200
+DELETE /admin/deeplinks/:id admin_delete_deeplink
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  DELETE deep_links
+  RETURN 204
+GET /admin/users admin_list_users
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> users
+  RETURN 200
+GET /admin/audit admin_list_audit_log
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY audit_logs -> logs
+  RETURN 200
+GET /admin/dashboard admin_dashboard
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> total_users
+  QUERY users -> active_users
+  QUERY users -> suspended_users
+  QUERY badges -> pending_badges
+  QUERY user_reports -> pending_reports
+  QUERY subscriptions -> active_subs
+  RETURN 200
+GET /admin/activity admin_recent_activity
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> recent_users
+  QUERY user_reports -> recent_reports
+  QUERY badges -> recent_badges
+  RETURN 200
+GET /health health
+  RETURN 200
+POST /auth/otp/request request_otp
+  COMPUTE sms_result = FuncCall { name: "sms.send_otp", args: [Path { value: "body.phone" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/otp/verify verify_otp
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT sessions
+      COMPUTE welcome_title
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/otp/email/request request_email_otp
+  COMPUTE otp_title = FuncCall { name: "T:email.otp.title", args: [] }
+  COMPUTE otp_message = FuncCall { name: "T:email.otp.message", args: [] }
+  COMPUTE otp_expiry = FuncCall { name: "T:email.otp.expiry_note", args: [Literal { value: "'5'" }] }
+  COMPUTE email_otp = FuncCall { name: "email.send_otp", args: [Path { value: "body.email" }, Literal { value: "'email/otp.html'" }, Path { value: "otp_message" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/otp/email/verify verify_email_otp
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+GET /auth/me get_me
+  auth: session
+  FETCH users -> user (or 404)
+  RETURN 200
+PUT /auth/profile update_profile
+  auth: session
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/logout logout
+  auth: session
+  DELETE sessions
+  RETURN 204
+GET /auth/sessions list_sessions
+  auth: session
+  QUERY sessions -> active_sessions
+  RETURN 200
+DELETE /auth/sessions/:id terminate_session
+  auth: session
+  FETCH sessions -> session (or 404)
+  GUARD ownership 403 "not your session"
+  DELETE sessions
+  RETURN 204
+POST /auth/session/refresh refresh_session
+  auth: session
+  UPDATE sessions -> refreshed
+  RETURN 200
+POST /auth/totp/setup totp_setup
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD not_already_enabled 400 "totp already enabled"
+  COMPUTE totp_data = FuncCall { name: "totp.generate_secret", args: [Path { value: "auth.user_id" }, Literal { value: "'Helperbook'" }] }
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/totp/enable totp_enable
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD has_secret 400 "call /auth/totp/setup first"
+  GUARD not_already_enabled 400 "totp already enabled"
+  COMPUTE verify = FuncCall { name: "totp.verify_code", args: [Path { value: "user.totp_secret" }, Path { value: "body.code" }] }
+  GUARD valid_code 401 "invalid totp code"
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/totp/disable totp_disable
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD is_enabled 400 "totp is not enabled"
+  COMPUTE verify = FuncCall { name: "totp.verify_code", args: [Path { value: "user.totp_secret" }, Path { value: "body.code" }] }
+  GUARD valid_code 401 "invalid totp code"
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/verify/phone request_phone_verify
+  auth: session
+  COMPUTE sms_result = FuncCall { name: "sms.send_otp", args: [Path { value: "body.phone" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/verify/phone/confirm confirm_phone_verify
+  auth: session
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/verify/email request_email_verify
+  auth: session
+  COMPUTE email_otp = FuncCall { name: "email.send_otp", args: [Path { value: "body.email" }, Literal { value: "'email/verify.html'" }, Path { value: "body.email" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/verify/email/confirm confirm_email_verify
+  auth: session
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/account/delete delete_account
+  auth: session
+  GUARD confirmed 400 "type DELETE to confirm"
+  UPDATE users -> deleted
+  DELETE sessions
+  RETURN 200
+POST /auth/social/google google_login
+  COMPUTE google = FuncCall { name: "google_auth.verify_token", args: [Path { value: "body.token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/apple apple_login
+  COMPUTE apple = FuncCall { name: "apple_auth.verify_token", args: [Path { value: "body.id_token" }, Path { value: "body.authorization_code" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/linkedin linkedin_login
+  COMPUTE tokens = FuncCall { name: "linkedin_auth.exchange_code", args: [Path { value: "body.code" }] }
+  COMPUTE profile = FuncCall { name: "linkedin_auth.get_profile", args: [Path { value: "tokens.access_token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/meta meta_login
+  COMPUTE tokens = FuncCall { name: "meta_auth.exchange_code", args: [Path { value: "body.code" }] }
+  COMPUTE profile = FuncCall { name: "meta_auth.get_profile", args: [Path { value: "tokens.access_token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /webhooks/stripe/checkout stripe_checkout_completed
+  auth: webhook_signature
+  FETCH users -> buyer (or 200)
+  FETCH subscriptions -> existing_sub (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing_sub" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  COMPUTE billing_desc = FuncCall { name: "T:commerce.subscription.plus_monthly", args: [] }
+  INSERT billing_history -> billing_record
+  INSERT notifications -> sub_notif
+  RETURN 200
+POST /webhooks/stripe/cancel stripe_subscription_cancelled
+  auth: webhook_signature
+  FETCH users -> sub_user (or 200)
+  FETCH subscriptions -> active_sub (or 200)
+  UPDATE subscriptions -> cancelled
+  COMPUTE cancel_title = FuncCall { name: "T:commerce.subscription.cancelled", args: [] }
+  INSERT notifications -> cancel_notif
+  RETURN 200
+POST /webhooks/stripe/fail stripe_payment_failed
+  auth: webhook_signature
+  FETCH users -> failed_user (or 200)
+  COMPUTE fail_title = FuncCall { name: "T:commerce.subscription.payment_failed", args: [] }
+  INSERT notifications -> fail_notif
+  COMPUTE fail_push = FuncCall { name: "push.send_notification", args: [Path { value: "failed_user.id" }, Path { value: "fail_title" }, Path { value: "fail_title" }, Path { value: "body.subscription_id" }] }
+  RETURN 200
+POST /webhooks/:provider webhook_receiver
+  RETURN 200
+POST /auth/sessions/terminate-all terminate_all_sessions
+  auth: session
+  DELETE sessions
+  RETURN 200
+GET /subscription get_subscription
+  auth: session
+  FETCH subscriptions -> sub (or 0)
+  RETURN 200
+POST /subscription/checkout create_checkout
+  auth: session
+  COMPUTE checkout = FuncCall { name: "payment.create_checkout", args: [Path { value: "auth.user_id" }, Path { value: "body.plan" }, Path { value: "body.return_url" }] }
+  RETURN 200
+POST /subscription/activate activate_subscription
+  auth: session
+  FETCH subscriptions -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  COMPUTE billing_desc = FuncCall { name: "T:commerce.subscription.plus_monthly", args: [] }
+  INSERT billing_history -> billing
+  FETCH users -> sub_user (or 0)
+  INSERT notifications -> sub_notif
+  RETURN 200
+POST /subscription/cancel cancel_subscription
+  auth: session
+  FETCH subscriptions -> sub (or 404)
+  UPDATE subscriptions -> updated
+  RETURN 200
+GET /billing list_billing
+  auth: session
+  QUERY billing_history -> history
+  RETURN 200
+GET /history list_service_history
+  auth: session
+  QUERY service_history -> as_client
+  QUERY service_history -> as_provider
+  RETURN 200
+POST /history record_service
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "appointment must be completed"
+  GUARD is_participant 403 "not your appointment"
+  INSERT service_history -> record
+  RETURN 201
+GET /referral get_referral_info
+  auth: session
+  FETCH users -> user (or 404)
+  QUERY referrals -> referral_count
+  RETURN 200
+POST /referral/apply apply_referral
+  auth: session
+  FETCH users -> referrer (or 404)
+  GUARD not_self 400 "cannot use your own referral code"
+  INSERT referrals -> referral
+  FETCH subscriptions -> existing_sub (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing_sub" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  UPDATE referrals -> rewarded
+  COMPUTE reward_title = FuncCall { name: "T:commerce.referral.reward_granted", args: [] }
+  INSERT notifications -> reward_notif
+  RETURN 201
+GET /earnings get_earnings
+  auth: session
+  QUERY provider_earnings -> earnings
+  RETURN 200
+GET /earnings/summary get_earnings_summary
+  auth: session
+  QUERY provider_earnings -> all_earnings
+  QUERY provider_earnings -> available
+  QUERY provider_earnings -> paid_out
+  RETURN 200
+GET /payout-methods list_payout_methods
+  auth: session
+  QUERY payout_methods -> methods
+  RETURN 200
+POST /payout-methods add_payout_method
+  auth: session
+  INSERT payout_methods -> method
+  RETURN 201
+PUT /payout-methods/:id update_payout_method
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD ownership 403 "not your payout method"
+  UPDATE payout_methods -> updated
+  RETURN 200
+DELETE /payout-methods/:id delete_payout_method
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD ownership 403 "not your payout method"
+  DELETE payout_methods
+  RETURN 204
+POST /payouts request_payout
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD method_ownership 403 "not your payout method"
+  GUARD method_verified 400 "payout method not verified"
+  QUERY provider_earnings -> available
+  GUARD has_balance 400 "insufficient balance"
+  INSERT payouts -> payout
+  COMPUTE payout_title = FuncCall { name: "T:finance.payout_requested", args: [] }
+  INSERT notifications -> payout_notif
+  RETURN 201
+GET /payouts list_payouts
+  auth: session
+  QUERY payouts -> payouts
+  RETURN 200
+GET /payouts/:id get_payout
+  auth: session
+  FETCH payouts -> payout (or 404)
+  GUARD ownership 403 "not your payout"
+  RETURN 200
+POST /conversations start_conversation
+  auth: session
+  GUARD not_self 400 "cannot message yourself"
+  INSERT conversations -> conversation
+  INSERT conversation_participants -> p1
+  INSERT conversation_participants -> p2
+  RETURN 201
+POST /conversations/group create_group
+  auth: session
+  INSERT conversations -> conversation
+  INSERT conversation_participants -> creator_participant
+  RETURN 201
+PUT /conversations/:id/group update_group
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> participant (or 403)
+  GUARD is_admin 403 "only admins can edit group"
+  UPDATE conversations -> updated
+  RETURN 200
+POST /conversations/:id/members add_group_member
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> participant (or 403)
+  GUARD is_admin 403 "only admins can add members"
+  INSERT conversation_participants -> new_member
+  RETURN 201
+DELETE /conversations/:conv_id/members/:user_id remove_group_member
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> my_role (or 403)
+  GUARD is_admin 403 "only admins can remove members"
+  DELETE conversation_participants
+  RETURN 204
+POST /conversations/:id/leave leave_group
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  DELETE conversation_participants
+  RETURN 204
+GET /conversations list_conversations
+  auth: session
+  QUERY conversation_participants -> participations
+  RETURN 200
+POST /conversations/:id/messages send_message
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE moderation = FuncCall { name: "openai.moderate", args: [Path { value: "body.content" }] }
+  INSERT messages -> message
+  COMPUTE push_title = FuncCall { name: "T:push.new_message", args: [Path { value: "auth.user_id" }] }
+  COMPUTE push_preview = FuncCall { name: "RENDER:push/new_message.txt", args: [Path { value: "auth.user_id" }, Path { value: "body.content" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "participant.user_id" }, Path { value: "push_title" }, Path { value: "push_preview" }, Path { value: "message.id" }] }
+  INSERT notifications -> msg_notif
+  RETURN 201
+GET /conversations/:id/messages list_messages
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> msgs
+  RETURN 200
+PUT /messages/:id edit_message
+  auth: session
+  FETCH messages -> message (or 404)
+  GUARD is_sender 403 "not your message"
+  GUARD within_48h 400 "edit window expired"
+  UPDATE messages -> updated
+  RETURN 200
+DELETE /messages/:id delete_message
+  auth: session
+  FETCH messages -> message (or 404)
+  GUARD is_sender 403 "not your message"
+  GUARD within_48h 400 "delete window expired"
+  COMPUTE deleted_text = FuncCall { name: "T:common.message_deleted", args: [] }
+  UPDATE messages -> deleted
+  RETURN 200
+POST /conversations/:id/attachment upload_attachment
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  INSERT messages -> message
+  COMPUTE push_title = FuncCall { name: "T:push.new_attachment", args: [Path { value: "auth.user_id" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "participant.user_id" }, Path { value: "push_title" }, Path { value: "push_title" }, Path { value: "message.id" }] }
+  INSERT notifications -> attach_notif
+  RETURN 201
+POST /conversations/:id/read mark_read
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+POST /conversations/:id/archive archive_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+POST /conversations/:id/unarchive unarchive_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+GET /templates list_templates
+  auth: session
+  QUERY reply_templates -> templates
+  RETURN 200
+POST /templates create_template
+  auth: session
+  INSERT reply_templates -> template
+  RETURN 201
+PUT /templates/:id update_template
+  auth: session
+  FETCH reply_templates -> template (or 404)
+  GUARD ownership 403 "not your template"
+  UPDATE reply_templates -> updated
+  RETURN 200
+DELETE /templates/:id delete_template
+  auth: session
+  FETCH reply_templates -> template (or 404)
+  GUARD ownership 403 "not your template"
+  DELETE reply_templates
+  RETURN 204
+POST /messages/:id/translate translate_message
+  auth: session
+  FETCH messages -> message (or 404)
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE translation = FuncCall { name: "openai.translate", args: [Path { value: "message.content" }, Path { value: "body.target_lang" }] }
+  RETURN 200
+POST /conversations/:id/suggest suggest_replies
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> recent
+  COMPUTE suggestions = FuncCall { name: "openai.suggest_replies", args: [Path { value: "recent" }, Literal { value: "'provider'" }] }
+  RETURN 200
+POST /conversations/:id/summarize summarize_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> all_messages
+  COMPUTE summary = FuncCall { name: "openai.summarize", args: [Path { value: "all_messages" }, Literal { value: "5" }] }
+  RETURN 200
+GET /conversations/:id/search search_messages
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE results = FuncCall { name: "search.search", args: [Literal { value: "'messages'" }, Path { value: "query.q" }, Path { value: "path.id" }, Literal { value: "20" }] }
+  RETURN 200
+GET /categories list_categories
+  auth: session
+  QUERY service_categories -> categories
+  RETURN 200
+GET /categories/:id get_category
+  auth: session
+  FETCH service_categories -> category (or 404)
+  RETURN 200
+GET /my/services list_my_services
+  auth: session
+  QUERY user_services -> services
+  RETURN 200
+POST /my/services add_service
+  auth: session
+  FETCH service_categories -> category (or 404)
+  INSERT user_services -> service
+  COMPUTE index_result = FuncCall { name: "search_providers.index", args: [Literal { value: "'providers'" }, Path { value: "service.id" }, Path { value: "body.description" }] }
+  RETURN 201
+PUT /my/services/:id update_service
+  auth: session
+  FETCH user_services -> service (or 404)
+  GUARD ownership 403 "not your service"
+  UPDATE user_services -> updated
+  COMPUTE reindex = FuncCall { name: "search_providers.index", args: [Literal { value: "'providers'" }, Path { value: "path.id" }, Path { value: "body.description" }] }
+  RETURN 200
+DELETE /my/services/:id delete_service
+  auth: session
+  FETCH user_services -> service (or 404)
+  GUARD ownership 403 "not your service"
+  DELETE user_services
+  COMPUTE deindex = FuncCall { name: "search_providers.remove", args: [Literal { value: "'providers'" }, Path { value: "path.id" }] }
+  RETURN 204
+POST /connections send_connection_request
+  auth: session
+  GUARD not_self 400 "cannot connect to yourself"
+  FETCH users -> target (or 404)
+  GUARD target_active 400 "user is not active"
+  INSERT connections -> connection
+  COMPUTE conn_title = FuncCall { name: "T:push.connection_request", args: [Path { value: "auth.user_id" }] }
+  COMPUTE conn_push = FuncCall { name: "push.send_notification", args: [Path { value: "body.contact_id" }, Path { value: "conn_title" }, Path { value: "body.message" }, Path { value: "connection.id" }] }
+  INSERT notifications -> conn_notif
+  RETURN 201
+GET /connections list_connections
+  auth: session
+  QUERY connections -> connections
+  RETURN 200
+GET /connections/incoming list_incoming_requests
+  auth: session
+  QUERY connections -> requests
+  RETURN 200
+PUT /connections/:id respond_connection
+  auth: session
+  FETCH connections -> connection (or 404)
+  GUARD is_recipient 403 "not your request"
+  GUARD is_pending 400 "request is not pending"
+  UPDATE connections -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.status" }, right: Path { value: "accepted" } }
+      COMPUTE accept_title
+      COMPUTE accept_push
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+  RETURN 200
+DELETE /connections/:id remove_connection
+  auth: session
+  FETCH connections -> connection (or 404)
+  GUARD is_participant 403 "not your connection"
+  DELETE connections
+  RETURN 204
+POST /contacts/:contact_id/favorite add_favorite
+  auth: session
+  INSERT contact_favorites -> fav
+  RETURN 201
+DELETE /contacts/:contact_id/favorite remove_favorite
+  auth: session
+  DELETE contact_favorites
+  RETURN 204
+PUT /contacts/:contact_id/note upsert_note
+  auth: session
+  FETCH contact_notes -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE contact_notes
+    DEFAULT
+      INSERT contact_notes
+  RETURN 200
+GET /contacts/:contact_id/note get_note
+  auth: session
+  FETCH contact_notes -> note (or 404)
+  RETURN 200
+GET /folders list_folders
+  auth: session
+  QUERY contact_folders -> folders
+  RETURN 200
+POST /folders create_folder
+  auth: session
+  INSERT contact_folders -> folder
+  RETURN 201
+PUT /folders/:id update_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  UPDATE contact_folders -> updated
+  RETURN 200
+DELETE /folders/:id delete_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  DELETE contact_folders
+  RETURN 204
+POST /folders/:id/members add_to_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  INSERT contact_folder_members -> member
+  RETURN 201
+DELETE /folders/:folder_id/members/:contact_id remove_from_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  DELETE contact_folder_members
+  RETURN 204
+GET /network/search search_network
+  auth: session
+  COMPUTE results = FuncCall { name: "search_providers.search", args: [Literal { value: "'providers'" }, Path { value: "query.q" }, Path { value: "query.category_id" }, Literal { value: "20" }] }
+  RETURN 200
+GET /network/nearby nearby_providers
+  auth: session
+  QUERY users -> providers
+  RETURN 200
+POST /network/geocode geocode_address
+  auth: session
+  COMPUTE result = FuncCall { name: "geo.geocode", args: [Path { value: "body.address" }] }
+  RETURN 200
+POST /network/distance distance_to
+  auth: session
+  FETCH users -> me (or 404)
+  FETCH users -> provider (or 404)
+  COMPUTE dist = FuncCall { name: "geo.distance", args: [Path { value: "me.location_lat" }, Path { value: "me.location_lng" }, Path { value: "provider.location_lat" }, Path { value: "provider.location_lng" }] }
+  RETURN 200
+GET /network browse_network
+  auth: session
+  QUERY users -> providers
+  RETURN 200
+GET /profile/:slug get_profile
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD is_active 404 "profile not found"
+  RETURN 200
+GET /profile/:user_id/services get_user_services
+  auth: session
+  QUERY user_services -> services
+  RETURN 200
+POST /reviews create_review
+  auth: session
+  GUARD valid_rating_min 400 "rating must be 1-5"
+  GUARD valid_rating_max 400 "rating must be 1-5"
+  GUARD not_self 400 "cannot review yourself"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "appointment must be completed"
+  COMPUTE moderation = FuncCall { name: "ai_moderation.moderate", args: [Path { value: "body.content" }] }
+  INSERT reviews -> review
+  COMPUTE review_title = FuncCall { name: "T:push.review_received", args: [Path { value: "body.rating" }] }
+  COMPUTE review_push = FuncCall { name: "push.send_notification", args: [Path { value: "body.reviewee_id" }, Path { value: "review_title" }, Path { value: "body.content" }, Path { value: "review.id" }] }
+  INSERT notifications -> review_notif
+  RETURN 201
+GET /reviews/:user_id list_reviews
+  auth: session
+  QUERY reviews -> user_reviews
+  RETURN 200
+POST /reviews/:id/respond respond_review
+  auth: session
+  FETCH reviews -> review (or 404)
+  GUARD is_reviewee 403 "only the reviewed user can respond"
+  GUARD no_existing_response 400 "already responded"
+  UPDATE reviews -> updated
+  RETURN 200
+POST /badges/id-check request_id_check
+  auth: session
+  FETCH badges -> existing (or 0)
+  GUARD no_pending 400 "you already have a pending request"
+  INSERT badges -> badge
+  RETURN 201
+POST /badges/document/selfie upload_badge_selfie
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+POST /badges/document/id-front upload_badge_id_front
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+POST /badges/document/id-back upload_badge_id_back
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+GET /badges/status get_badge_status
+  auth: session
+  FETCH badges -> id_check (or 0)
+  RETURN 200
+POST /disputes open_dispute
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "can only dispute completed appointments"
+  INSERT disputes -> dispute
+  RETURN 201
+PUT /disputes/:id counter_dispute
+  auth: session
+  FETCH disputes -> dispute (or 404)
+  GUARD is_open 400 "dispute is not open"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_party 403 "not a party to this dispute"
+  UPDATE disputes -> updated
+  RETURN 200
+POST /disputes/:id/resolve resolve_dispute
+  auth: session
+  FETCH disputes -> dispute (or 404)
+  GUARD is_open 400 "dispute is not open"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_party 403 "not a party to this dispute"
+  UPDATE disputes -> updated
+  RETURN 200
+GET /disputes list_disputes
+  auth: session
+  QUERY disputes -> disputes
+  RETURN 200
+POST /reports submit_report
+  auth: session
+  GUARD not_self 400 "cannot report yourself"
+  COMPUTE report_moderation = FuncCall { name: "ai_moderation.moderate", args: [Path { value: "body.description" }] }
+  INSERT user_reports -> report
+  RETURN 201
+GET /provider/profile get_provider_profile
+  auth: session
+  FETCH provider_profiles -> profile (or 404)
+  RETURN 200
+PUT /provider/profile upsert_provider_profile
+  auth: session
+  FETCH provider_profiles -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE provider_profiles
+    DEFAULT
+      INSERT provider_profiles
+  RETURN 200
+GET /provider/onboarding get_onboarding_status
+  auth: session
+  FETCH provider_onboarding -> onboarding (or 0)
+  RETURN 200
+POST /provider/onboarding start_onboarding
+  auth: session
+  FETCH provider_onboarding -> existing (or 0)
+  GUARD not_started 400 "onboarding already started"
+  INSERT provider_onboarding -> onboarding
+  UPDATE users -> user_updated
+  RETURN 201
+POST /provider/onboarding/advance advance_onboarding
+  auth: session
+  FETCH provider_onboarding -> onboarding (or 404)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "profile" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "services" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "availability" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "documents" } }
+      UPDATE provider_onboarding
+    DEFAULT
+      UPDATE provider_onboarding
+  RETURN 200
+GET /provider/availability list_availability
+  auth: session
+  QUERY provider_availability -> slots
+  RETURN 200
+POST /provider/availability set_availability
+  auth: session
+  GUARD valid_day 400 "day_of_week must be 0-6"
+  GUARD valid_day_min 400 "day_of_week must be 0-6"
+  INSERT provider_availability -> slot
+  RETURN 201
+DELETE /provider/availability/:id delete_availability
+  auth: session
+  FETCH provider_availability -> slot (or 404)
+  GUARD ownership 403 "not your slot"
+  DELETE provider_availability
+  RETURN 204
+PUT /provider/status set_status
+  auth: session
+  FETCH provider_status -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE provider_status
+    DEFAULT
+      INSERT provider_status
+  RETURN 200
+GET /provider/status get_status
+  auth: session
+  FETCH provider_status -> status (or 0)
+  RETURN 200
+POST /appointments propose_appointment
+  auth: session
+  GUARD valid_time 400 "end must be after start"
+  GUARD future 400 "appointment must be in the future"
+  INSERT appointments -> appointment
+  COMPUTE notify_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "body.title" }, Path { value: "auth.user_id" }, Path { value: "body.start_at" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "body.provider_id" }, Path { value: "notify_title" }, Path { value: "body.notes" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> appt_notif
+  RETURN 201
+GET /appointments list_appointments
+  auth: session
+  QUERY appointments -> as_client
+  QUERY appointments -> as_provider
+  RETURN 200
+GET /appointments/:id get_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_participant 403 "not your appointment"
+  RETURN 200
+POST /appointments/:id/confirm confirm_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_pending 400 "appointment is not proposed"
+  UPDATE appointments -> updated
+  COMPUTE confirm_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.proposed_by" }, Path { value: "confirm_title" }, Path { value: "appointment.title" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> confirm_notif
+  RETURN 200
+POST /appointments/:id/dismiss dismiss_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_actionable 400 "appointment cannot be dismissed"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /appointments/:id/cancel cancel_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_cancelable 400 "appointment cannot be cancelled"
+  UPDATE appointments -> updated
+  COMPUTE cancel_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE cancel_push = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.provider_id" }, Path { value: "cancel_title" }, Path { value: "body.reason" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> cancel_notif
+  RETURN 200
+POST /appointments/:id/start start_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_confirmed 400 "appointment must be confirmed first"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /appointments/:id/complete complete_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_in_progress 400 "appointment must be in progress"
+  UPDATE appointments -> updated
+  COMPUTE complete_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE complete_push = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.client_id" }, Path { value: "complete_title" }, Path { value: "appointment.title" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> complete_notif
+  RETURN 200
+POST /appointments/:id/no-show mark_no_show
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_confirmable 400 "appointment must be confirmed or in progress"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /calendar/connect connect_calendar
+  auth: session
+  FETCH calendar_syncs -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE calendar_syncs
+    DEFAULT
+      INSERT calendar_syncs
+  RETURN 200
+DELETE /calendar/:provider disconnect_calendar
+  auth: session
+  DELETE calendar_syncs
+  RETURN 204
+GET /calendar/status get_calendar_status
+  auth: session
+  QUERY calendar_syncs -> syncs
+  RETURN 200
+POST /appointments/:id/calendar sync_appointment_to_calendar
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  FETCH calendar_syncs -> cal_sync (or 400)
+  COMPUTE cal_event = FuncCall { name: "calendar.create_event", args: [Path { value: "cal_sync.access_token" }, Path { value: "appointment.title" }, Path { value: "appointment.start_at" }, Path { value: "appointment.end_at" }, Path { value: "appointment.location" }, Path { value: "appointment.notes" }] }
+  INSERT appointment_calendar_events -> link
+  RETURN 201
+DELETE /appointments/:id/calendar remove_from_calendar
+  auth: session
+  FETCH appointment_calendar_events -> link (or 404)
+  FETCH calendar_syncs -> cal_sync (or 400)
+  COMPUTE result = FuncCall { name: "calendar.delete_event", args: [Path { value: "cal_sync.access_token" }, Path { value: "link.external_event_id" }] }
+  DELETE appointment_calendar_events
+  RETURN 204
+GET /providers/:user_id/availability get_public_availability
+  auth: session
+  QUERY provider_availability -> slots
+  RETURN 200
+GET /providers/:user_id/status get_public_status
+  auth: session
+  FETCH provider_status -> status (or 0)
+  RETURN 200
+GET /settings get_settings
+  auth: session
+  FETCH user_settings -> settings (or 0)
+  RETURN 200
+PUT /settings update_settings
+  auth: session
+  FETCH user_settings -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE user_settings
+    DEFAULT
+      INSERT user_settings
+  RETURN 200
+POST /blocked block_user
+  auth: session
+  GUARD not_self 400 "cannot block yourself"
+  INSERT blocked_users -> blocked
+  RETURN 201
+DELETE /blocked/:user_id unblock_user
+  auth: session
+  DELETE blocked_users
+  RETURN 204
+GET /blocked list_blocked
+  auth: session
+  QUERY blocked_users -> blocked
+  RETURN 200
+GET /notifications list_notifications
+  auth: session
+  QUERY notifications -> notifs
+  RETURN 200
+POST /notifications/:id/read mark_notification_read
+  auth: session
+  FETCH notifications -> notif (or 404)
+  GUARD ownership 403 "not your notification"
+  UPDATE notifications -> updated
+  RETURN 200
+POST /notifications/read-all mark_all_read
+  auth: session
+  QUERY notifications -> unread
+  UPDATE notifications -> updated
+  RETURN 200
+GET /notifications/unread-count unread_count
+  auth: session
+  QUERY notifications -> unread
+  RETURN 200
+POST /devices register_device
+  auth: session
+  INSERT device_tokens -> device
+  RETURN 201
+DELETE /devices/:id unregister_device
+  auth: session
+  FETCH device_tokens -> device (or 404)
+  GUARD ownership 403 "not your device"
+  DELETE device_tokens
+  RETURN 204
+POST /avatar/upload upload_avatar
+  auth: session
+  UPDATE users -> updated
+  RETURN 200
+POST /gallery/upload upload_gallery_image
+  auth: session
+  INSERT gallery_images -> image
+  RETURN 201
+GET /gallery list_gallery
+  auth: session
+  QUERY gallery_images -> images
+  RETURN 200
+POST /gallery add_gallery_image
+  auth: session
+  INSERT gallery_images -> image
+  RETURN 201
+DELETE /gallery/:id delete_gallery_image
+  auth: session
+  FETCH gallery_images -> image (or 404)
+  GUARD ownership 403 "not your image"
+  DELETE gallery_images
+  RETURN 204
+GET /profile/:user_id/gallery get_public_gallery
+  auth: session
+  QUERY gallery_images -> images
+  RETURN 200

@@ -1,0 +1,40 @@
+{
+  "name": "google-calendar",
+  "version": "0.1.0",
+  "description": "External calendar sync via Google Calendar API",
+  "service": "calendar",
+  "methods": ["create_event", "update_event", "delete_event", "list_events"],
+  "provider": "google",
+  "config": {
+    "client_id": { "env": "GOOGLE_CLIENT_ID", "required": true },
+    "client_secret": { "env": "GOOGLE_CLIENT_SECRET", "required": true, "secret": true },
+    "redirect_uri": { "env": "GOOGLE_REDIRECT_URI", "required": true }
+  },
+  "endpoints": {
+    "create_event": {
+      "method": "POST",
+      "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+      "input": { "access_token": "string", "title": "string", "start_at": "string", "end_at": "string", "location": "string", "description": "string" },
+      "output": { "event_id": "string", "html_link": "string" }
+    },
+    "update_event": {
+      "method": "PUT",
+      "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events/${event_id}",
+      "input": { "access_token": "string", "event_id": "string", "title": "string", "start_at": "string", "end_at": "string" },
+      "output": { "event_id": "string", "success": "bool" }
+    },
+    "delete_event": {
+      "method": "DELETE",
+      "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events/${event_id}",
+      "input": { "access_token": "string", "event_id": "string" },
+      "output": { "success": "bool" }
+    },
+    "list_events": {
+      "method": "GET",
+      "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+      "input": { "access_token": "string", "time_min": "string", "time_max": "string" },
+      "output": { "events": "string", "total": "int" }
+    }
+  },
+  "hot_swap": true
+}

@@ -1,0 +1,31 @@
+-- Computed functions
+
+FUNC average_rating
+  INPUT user_id UUID
+  OUTPUT DECIMAL
+  LET user_reviews
+    QUERY reviews
+      FILTER reviewee_id EQ user_id
+      PAGE_SIZE 10000
+  RETURN user_reviews.total
+
+FUNC is_verified_provider
+  INPUT user_id UUID
+  OUTPUT BOOL
+  LET badge
+    FETCH badges
+      FILTER user_id EQ user_id
+      FILTER badge_type EQ id_check
+      FILTER status EQ approved
+    OR 0 "ok"
+  RETURN badge.status
+
+FUNC provider_completion_rate
+  INPUT user_id UUID
+  OUTPUT DECIMAL
+  LET completed
+    QUERY appointments
+      FILTER provider_id EQ user_id
+      FILTER status EQ completed
+      PAGE_SIZE 10000
+  RETURN completed.total

@@ -1,0 +1,33 @@
+{
+  "name": "meilisearch",
+  "version": "0.1.0",
+  "description": "Full-text search via Meilisearch — provider discovery, message search",
+  "service": "search",
+  "methods": ["index", "search", "delete"],
+  "provider": "meilisearch",
+  "config": {
+    "host": { "env": "MEILISEARCH_HOST", "required": true },
+    "api_key": { "env": "MEILISEARCH_API_KEY", "required": true, "secret": true }
+  },
+  "endpoints": {
+    "index": {
+      "method": "POST",
+      "url": "${MEILISEARCH_HOST}/indexes/${index}/documents",
+      "input": { "index_name": "string", "document_id": "string", "body": "string" },
+      "output": { "task_id": "int", "success": "bool" }
+    },
+    "search": {
+      "method": "POST",
+      "url": "${MEILISEARCH_HOST}/indexes/${index}/search",
+      "input": { "index_name": "string", "query": "string", "filters": "string", "limit": "int" },
+      "output": { "hits": "string", "total": "int" }
+    },
+    "delete": {
+      "method": "DELETE",
+      "url": "${MEILISEARCH_HOST}/indexes/${index}/documents/${id}",
+      "input": { "index_name": "string", "document_id": "string" },
+      "output": { "success": "bool" }
+    }
+  },
+  "hot_swap": true
+}

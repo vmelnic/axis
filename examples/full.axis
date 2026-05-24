@@ -1,0 +1,200 @@
+-- Full example exercising all 10 Axis constructs
+
+SHAPE User
+  id UUID PK AUTO
+  name STRING 100 REQUIRED
+  email STRING 255 REQUIRED UNIQUE
+  role ENUM admin user moderator REQUIRED
+  created_at TIMESTAMP DEFAULT NOW
+
+SHAPE Order
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  item_id UUID REQUIRED
+  quantity INT MIN 1 MAX 100 REQUIRED
+  status ENUM pending confirmed shipped cancelled REQUIRED
+  total DECIMAL PRECISION 10 SCALE 2 REQUIRED
+  created_at TIMESTAMP DEFAULT NOW
+
+SHAPE Item
+  id UUID PK AUTO
+  name STRING 200 REQUIRED
+  price DECIMAL PRECISION 8 SCALE 2 REQUIRED
+  stock INT MIN 0 REQUIRED
+
+SOURCE users POSTGRES
+  SHAPE User
+  INDEX email
+
+SOURCE orders POSTGRES
+  SHAPE Order
+  INDEX user_id created_at DESC
+  INDEX item_id status
+
+SOURCE items POSTGRES
+  SHAPE Item
+  INDEX id
+
+REALM shop_api
+  TENANT user_id
+  CAPABILITY read users
+  CAPABILITY read orders
+  CAPABILITY write orders
+  CAPABILITY read items
+  CAPABILITY effect email
+
+POLICY require_auth
+  APPLIES_TO FLOW
+  REQUIRE AUTH
+
+POLICY require_limit_on_writes
+  APPLIES_TO FLOW WHERE METHOD IN post put delete
+  REQUIRE LIMIT
+
+SERVICE payments
+  ENDPOINT stripe
+  AUTH bearer VAULT stripe_api_key
+  METHOD charge
+    INPUT amount DECIMAL currency STRING 10
+    OUTPUT transaction_id STRING 100 status STRING 20
+    TIMEOUT 30 s
+    RETRY 3 BACKOFF exponential
+  METHOD refund
+    INPUT transaction_id STRING 100
+    OUTPUT refund_id STRING 100
+    TIMEOUT 30 s
+    RETRY 2 BACKOFF exponential
+
+FLOW list_orders get /orders
+  REALM shop_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 100 PER_MINUTE PER_USER
+  LET orders
+    QUERY orders
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 20
+  RETURN 200 orders
+
+FLOW get_order get /orders/:id
+  REALM shop_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 100 PER_MINUTE PER_USER
+  CACHE 60 VARY path.id auth.user_id
+  LET order
+    FETCH orders
+      FILTER id EQ path.id
+    OR 404
+  GUARD ownership 403 "not your order"
+    EQ order.user_id auth.user_id
+  RETURN 200 order
+
+FLOW create_order post /orders
+  REALM shop_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 PER_MINUTE PER_USER
+  BODY OrderCreate
+    item_id UUID REQUIRED
+    quantity INT MIN 1 REQUIRED
+  LET item
+    FETCH items
+      FILTER id EQ body.item_id
+    OR 404
+  GUARD in_stock 409 "out of stock"
+    GTE item.stock body.quantity
+  LET qty_decimal
+    TO_DECIMAL body.quantity
+  LET total
+    MUL item.price qty_decimal
+  INSERT orders
+    user_id auth.user_id
+    item_id body.item_id
+    quantity body.quantity
+    status pending
+    total total
+  AS order
+  EFFECT email
+    TEMPLATE order_created
+    TO auth.user_id
+    DATA order
+  RETURN 201 order
+
+SAGA process_order POST /orders/process
+  REALM shop_api
+  AUTH session
+  BODY OrderProcess
+    order_id UUID REQUIRED
+
+  STEP verify_order
+    LET order
+      FETCH orders
+        FILTER id EQ body.order_id
+      OR 404
+    VERIFY
+      EQ order.status pending
+    YIELD order
+    COMPENSATE NONE
+
+  STEP charge_payment
+    LET payment
+      CALL payments.charge
+        amount order.total
+        currency usd
+      OR 500
+    YIELD payment
+    COMPENSATE
+      LET refund
+        CALL payments.refund
+          transaction_id payment.transaction_id
+        OR 500
+
+  STEP confirm_order
+    UPDATE orders
+      WHERE id EQ order.id
+      SET status confirmed
+    YIELD confirmed
+    COMPENSATE
+      UPDATE orders
+        WHERE id EQ order.id
+        SET status pending
+
+  ON_FAILURE RUN_COMPENSATIONS
+  ON_SUCCESS
+    EFFECT email
+      TEMPLATE order_confirmed
+      TO order.user_id
+      DATA order
+    RETURN 200 order
+
+SURFACE public v1
+  REALM shop_api
+  BASE_PATH /api/v1
+  ROUTE GET /orders -> list_orders
+  ROUTE POST /orders -> create_order
+  ROUTE GET /orders/:id -> get_order
+  EXPOSE Order AS OrderResponse
+    FIELD id UUID
+    FIELD status STRING 20
+    FIELD quantity INT
+    FIELD total DECIMAL
+    HIDE user_id
+    HIDE item_id
+
+STREAM order_updates ws /ws/orders
+  AUTH session
+  EVENT order_status_changed
+    order_id UUID
+    status STRING 20
+    updated_at TIMESTAMP
+  EVENT order_shipped
+    order_id UUID
+    tracking_number STRING 100
+
+MIGRATE Order v1 TO v2
+  COPY id user_id item_id quantity status total created_at
+  ADD tracking_number MAYBE STRING 100
+  ADD shipped_at MAYBE TIMESTAMP
+  RENAME status TO order_status

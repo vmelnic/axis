@@ -1,0 +1,38 @@
+{
+  "email": {
+    "welcome": {
+      "greeting": "Welcome to Helperbook, {{name}}!",
+      "body": "You've joined a community of professionals and clients. Start exploring services near you.",
+      "footer": "You're receiving this because you signed up at helperbook.app"
+    },
+    "otp": {
+      "title": "Your verification code",
+      "message": "Use the code below to verify your identity:",
+      "expiry_note": "This code expires in {{minutes}} minutes."
+    }
+  },
+  "push": {
+    "appointment_reminder": "Reminder: {{service}} with {{provider}} at {{time}}",
+    "new_message": "New message from {{sender}}",
+    "connection_request": "{{name}} wants to connect with you",
+    "review_received": "New {{rating}}-star review received",
+    "badge_approved": "Your identity verification has been approved!",
+    "badge_rejected": "Your identity verification was not approved"
+  },
+  "sms": {
+    "otp": "Your Helperbook code is {{code}}. Expires in {{minutes}} min."
+  },
+  "commerce": {
+    "subscription": {
+      "plus_monthly": "Helperbook Plus - Monthly",
+      "cancelled": "Your subscription has been cancelled",
+      "payment_failed": "Payment failed for your subscription"
+    }
+  },
+  "common": {
+    "app_name": "Helperbook",
+    "greeting": "Hello, {{name}}",
+    "error": "Something went wrong. Please try again.",
+    "message_deleted": "This message was deleted"
+  }
+}

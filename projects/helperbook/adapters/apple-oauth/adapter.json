@@ -1,0 +1,23 @@
+{
+  "name": "apple-oauth",
+  "version": "0.1.0",
+  "description": "Apple Sign In — ID token verification via JWKS",
+  "service": "apple_auth",
+  "methods": ["verify_token"],
+  "provider": "apple",
+  "config": {
+    "client_id": { "env": "APPLE_CLIENT_ID", "required": true },
+    "team_id": { "env": "APPLE_TEAM_ID", "required": true },
+    "key_id": { "env": "APPLE_KEY_ID", "required": true },
+    "private_key": { "env": "APPLE_PRIVATE_KEY", "required": true, "secret": true }
+  },
+  "endpoints": {
+    "verify_token": {
+      "method": "POST",
+      "url": "https://appleid.apple.com/auth/token",
+      "input": { "id_token": "string", "authorization_code": "string" },
+      "output": { "sub": "string", "email": "string", "name": "string", "email_verified": "bool" }
+    }
+  },
+  "hot_swap": true
+}

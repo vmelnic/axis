@@ -1,0 +1,8722 @@
+{
+  "tests": [
+    {
+      "name": "check_version_type_invariant",
+      "flow": "check_version",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/version/check",
+        "body": {
+          "platform": "ios",
+          "version": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "resolve_deeplink_type_invariant",
+      "flow": "resolve_deeplink",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/dl/:slug"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_pending_badges_type_invariant",
+      "flow": "admin_list_pending_badges",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/badges/pending",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_pending_badges_auth_required",
+      "flow": "admin_list_pending_badges",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/badges/pending"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_review_badge_type_invariant",
+      "flow": "admin_review_badge",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/badges/:id/review",
+        "body": {
+          "status": "approved"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_review_badge_auth_required",
+      "flow": "admin_review_badge",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/badges/:id/review"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_review_badge_is_pending_guard_blocks",
+      "flow": "admin_review_badge",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/badges/:id/review",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "admin_list_reports_type_invariant",
+      "flow": "admin_list_reports",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/reports",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_reports_auth_required",
+      "flow": "admin_list_reports",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/reports"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_review_report_type_invariant",
+      "flow": "admin_review_report",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/reports/:id/review",
+        "body": {
+          "action": "no_action",
+          "status": "pending"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_review_report_auth_required",
+      "flow": "admin_review_report",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/reports/:id/review"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_get_user_type_invariant",
+      "flow": "admin_get_user",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/users/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_get_user_auth_required",
+      "flow": "admin_get_user",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/users/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_update_user_status_type_invariant",
+      "flow": "admin_update_user_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/admin/users/:id/status",
+        "body": {
+          "account_status": "active"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_update_user_status_auth_required",
+      "flow": "admin_update_user_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/admin/users/:id/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_create_version_type_invariant",
+      "flow": "admin_create_version",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/versions",
+        "body": {
+          "force_update": true,
+          "min_supported": "test_value",
+          "platform": "ios",
+          "recommended": "test_value",
+          "release_notes": "test text content",
+          "version": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "admin_create_version_auth_required",
+      "flow": "admin_create_version",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/versions"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_list_versions_type_invariant",
+      "flow": "admin_list_versions",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/versions",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_versions_auth_required",
+      "flow": "admin_list_versions",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/versions"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_update_version_type_invariant",
+      "flow": "admin_update_version",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/admin/versions/:id",
+        "body": {
+          "force_update": true,
+          "min_supported": "test_value",
+          "recommended": "test_value",
+          "release_notes": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_update_version_auth_required",
+      "flow": "admin_update_version",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/admin/versions/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_create_deeplink_type_invariant",
+      "flow": "admin_create_deeplink",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/deeplinks",
+        "body": {
+          "metadata": "test text content",
+          "slug": "test_value",
+          "target_id": "00000000-0000-0000-0000-000000000001",
+          "type": "profile"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "admin_create_deeplink_auth_required",
+      "flow": "admin_create_deeplink",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/admin/deeplinks"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_list_deeplinks_type_invariant",
+      "flow": "admin_list_deeplinks",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/deeplinks",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_deeplinks_auth_required",
+      "flow": "admin_list_deeplinks",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/deeplinks"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_delete_deeplink_type_invariant",
+      "flow": "admin_delete_deeplink",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/admin/deeplinks/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "admin_delete_deeplink_auth_required",
+      "flow": "admin_delete_deeplink",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/admin/deeplinks/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_list_users_type_invariant",
+      "flow": "admin_list_users",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/users",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_users_auth_required",
+      "flow": "admin_list_users",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/users"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_list_audit_log_type_invariant",
+      "flow": "admin_list_audit_log",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/audit",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_list_audit_log_auth_required",
+      "flow": "admin_list_audit_log",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/audit"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_dashboard_type_invariant",
+      "flow": "admin_dashboard",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/dashboard",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_dashboard_auth_required",
+      "flow": "admin_dashboard",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/dashboard"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "admin_recent_activity_type_invariant",
+      "flow": "admin_recent_activity",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/activity",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "admin_recent_activity_auth_required",
+      "flow": "admin_recent_activity",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/admin/activity"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "health_type_invariant",
+      "flow": "health",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/health"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "request_otp_type_invariant",
+      "flow": "request_otp",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/request",
+        "body": {
+          "phone": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "verify_otp_type_invariant",
+      "flow": "verify_otp",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/verify",
+        "body": {
+          "code": "test_value",
+          "phone": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "verify_otp_not_expired_guard_blocks",
+      "flow": "verify_otp",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/verify"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "verify_otp_not_used_guard_blocks",
+      "flow": "verify_otp",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/verify"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "request_email_otp_type_invariant",
+      "flow": "request_email_otp",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/email/request",
+        "body": {
+          "email": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "verify_email_otp_type_invariant",
+      "flow": "verify_email_otp",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/email/verify",
+        "body": {
+          "code": "test_value",
+          "email": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "verify_email_otp_not_expired_guard_blocks",
+      "flow": "verify_email_otp",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/email/verify"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "verify_email_otp_not_used_guard_blocks",
+      "flow": "verify_email_otp",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/otp/email/verify"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "get_me_type_invariant",
+      "flow": "get_me",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/auth/me",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_me_auth_required",
+      "flow": "get_me",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/auth/me"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_profile_type_invariant",
+      "flow": "update_profile",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/auth/profile",
+        "body": {
+          "avatar_url": "test_value",
+          "bio": "test text content",
+          "location_lat": "10.00",
+          "location_lng": "10.00",
+          "location_name": "test_value",
+          "name": "test_value",
+          "slug": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_profile_auth_required",
+      "flow": "update_profile",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/auth/profile"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "logout_type_invariant",
+      "flow": "logout",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/logout",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "logout_auth_required",
+      "flow": "logout",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/logout"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_sessions_type_invariant",
+      "flow": "list_sessions",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/auth/sessions",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_sessions_auth_required",
+      "flow": "list_sessions",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/auth/sessions"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "terminate_session_type_invariant",
+      "flow": "terminate_session",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/auth/sessions/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "terminate_session_auth_required",
+      "flow": "terminate_session",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/auth/sessions/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "terminate_session_ownership_guard_blocks",
+      "flow": "terminate_session",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/auth/sessions/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "refresh_session_type_invariant",
+      "flow": "refresh_session",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/session/refresh",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "refresh_session_auth_required",
+      "flow": "refresh_session",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/session/refresh"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "totp_setup_type_invariant",
+      "flow": "totp_setup",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/setup",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "totp_setup_auth_required",
+      "flow": "totp_setup",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/setup"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "totp_setup_not_already_enabled_guard_blocks",
+      "flow": "totp_setup",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/setup",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "totp_enable_type_invariant",
+      "flow": "totp_enable",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/enable",
+        "body": {
+          "code": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "totp_enable_auth_required",
+      "flow": "totp_enable",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/enable"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "totp_enable_has_secret_guard_blocks",
+      "flow": "totp_enable",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/enable",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "totp_enable_not_already_enabled_guard_blocks",
+      "flow": "totp_enable",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/enable",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "totp_enable_valid_code_guard_blocks",
+      "flow": "totp_enable",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/enable",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "totp_disable_type_invariant",
+      "flow": "totp_disable",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/disable",
+        "body": {
+          "code": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "totp_disable_auth_required",
+      "flow": "totp_disable",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/disable"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "totp_disable_is_enabled_guard_blocks",
+      "flow": "totp_disable",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/disable",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "totp_disable_valid_code_guard_blocks",
+      "flow": "totp_disable",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/totp/disable",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "request_phone_verify_type_invariant",
+      "flow": "request_phone_verify",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone",
+        "body": {
+          "phone": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "request_phone_verify_auth_required",
+      "flow": "request_phone_verify",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_phone_verify_type_invariant",
+      "flow": "confirm_phone_verify",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone/confirm",
+        "body": {
+          "code": "test_value",
+          "phone": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "confirm_phone_verify_auth_required",
+      "flow": "confirm_phone_verify",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone/confirm"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_phone_verify_not_expired_guard_blocks",
+      "flow": "confirm_phone_verify",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "confirm_phone_verify_not_used_guard_blocks",
+      "flow": "confirm_phone_verify",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/phone/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "request_email_verify_type_invariant",
+      "flow": "request_email_verify",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email",
+        "body": {
+          "email": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "request_email_verify_auth_required",
+      "flow": "request_email_verify",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_email_verify_type_invariant",
+      "flow": "confirm_email_verify",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email/confirm",
+        "body": {
+          "code": "test_value",
+          "email": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "confirm_email_verify_auth_required",
+      "flow": "confirm_email_verify",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email/confirm"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_email_verify_not_expired_guard_blocks",
+      "flow": "confirm_email_verify",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "confirm_email_verify_not_used_guard_blocks",
+      "flow": "confirm_email_verify",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/verify/email/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 401
+        }
+      }
+    },
+    {
+      "name": "delete_account_type_invariant",
+      "flow": "delete_account",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/account/delete",
+        "body": {
+          "confirmation": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "delete_account_auth_required",
+      "flow": "delete_account",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/account/delete"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_account_confirmed_guard_blocks",
+      "flow": "delete_account",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/account/delete",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "google_login_type_invariant",
+      "flow": "google_login",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/social/google",
+        "body": {
+          "token": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "apple_login_type_invariant",
+      "flow": "apple_login",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/social/apple",
+        "body": {
+          "authorization_code": "test_value",
+          "id_token": "test_value",
+          "name": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "linkedin_login_type_invariant",
+      "flow": "linkedin_login",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/social/linkedin",
+        "body": {
+          "code": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "meta_login_type_invariant",
+      "flow": "meta_login",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/social/meta",
+        "body": {
+          "code": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "stripe_checkout_completed_type_invariant",
+      "flow": "stripe_checkout_completed",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/checkout",
+        "body": {
+          "amount": 1,
+          "currency": "test_value",
+          "customer_email": "test_value",
+          "subscription_id": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "stripe_checkout_completed_auth_required",
+      "flow": "stripe_checkout_completed",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/checkout"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "stripe_subscription_cancelled_type_invariant",
+      "flow": "stripe_subscription_cancelled",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/cancel",
+        "body": {
+          "customer_email": "test_value",
+          "subscription_id": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "stripe_subscription_cancelled_auth_required",
+      "flow": "stripe_subscription_cancelled",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/cancel"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "stripe_payment_failed_type_invariant",
+      "flow": "stripe_payment_failed",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/fail",
+        "body": {
+          "customer_email": "test_value",
+          "subscription_id": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "stripe_payment_failed_auth_required",
+      "flow": "stripe_payment_failed",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/stripe/fail"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "webhook_receiver_type_invariant",
+      "flow": "webhook_receiver",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/webhooks/:provider",
+        "body": {
+          "data": "test text content",
+          "event": "test_value"
+        }
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "terminate_all_sessions_type_invariant",
+      "flow": "terminate_all_sessions",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/sessions/terminate-all",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "terminate_all_sessions_auth_required",
+      "flow": "terminate_all_sessions",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/auth/sessions/terminate-all"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_subscription_type_invariant",
+      "flow": "get_subscription",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/subscription",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_subscription_auth_required",
+      "flow": "get_subscription",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/subscription"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_subscription_tenant_isolation",
+      "flow": "get_subscription",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/subscription",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_checkout_type_invariant",
+      "flow": "create_checkout",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/checkout",
+        "body": {
+          "plan": "plus",
+          "return_url": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "create_checkout_auth_required",
+      "flow": "create_checkout",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/checkout"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_checkout_tenant_isolation",
+      "flow": "create_checkout",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/checkout",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "activate_subscription_type_invariant",
+      "flow": "activate_subscription",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/activate",
+        "body": {
+          "payment_provider": "stripe",
+          "provider_subscription_id": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "activate_subscription_auth_required",
+      "flow": "activate_subscription",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/activate"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "activate_subscription_tenant_isolation",
+      "flow": "activate_subscription",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/activate",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancel_subscription_type_invariant",
+      "flow": "cancel_subscription",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/cancel",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "cancel_subscription_auth_required",
+      "flow": "cancel_subscription",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/cancel"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancel_subscription_tenant_isolation",
+      "flow": "cancel_subscription",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/subscription/cancel",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_billing_type_invariant",
+      "flow": "list_billing",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/billing",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_billing_auth_required",
+      "flow": "list_billing",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/billing"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_billing_tenant_isolation",
+      "flow": "list_billing",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/billing",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_service_history_type_invariant",
+      "flow": "list_service_history",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/history",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_service_history_auth_required",
+      "flow": "list_service_history",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/history"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_service_history_tenant_isolation",
+      "flow": "list_service_history",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/history",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "record_service_type_invariant",
+      "flow": "record_service",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/history",
+        "body": {
+          "appointment_id": "00000000-0000-0000-0000-000000000001",
+          "currency": "eur",
+          "hours_worked": "10.00",
+          "rate": "10.00",
+          "services": "test text content",
+          "total_amount": "10.00"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "record_service_auth_required",
+      "flow": "record_service",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/history"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "record_service_tenant_isolation",
+      "flow": "record_service",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/history",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "record_service_is_completed_guard_blocks",
+      "flow": "record_service",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/history",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "record_service_is_participant_guard_blocks",
+      "flow": "record_service",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/history",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "get_referral_info_type_invariant",
+      "flow": "get_referral_info",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/referral",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_referral_info_auth_required",
+      "flow": "get_referral_info",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/referral"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_referral_info_tenant_isolation",
+      "flow": "get_referral_info",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/referral",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "apply_referral_type_invariant",
+      "flow": "apply_referral",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/referral/apply",
+        "body": {
+          "referral_code": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "apply_referral_auth_required",
+      "flow": "apply_referral",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/referral/apply"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "apply_referral_tenant_isolation",
+      "flow": "apply_referral",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/referral/apply",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "apply_referral_not_self_guard_blocks",
+      "flow": "apply_referral",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/referral/apply",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "get_earnings_type_invariant",
+      "flow": "get_earnings",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/earnings",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_earnings_auth_required",
+      "flow": "get_earnings",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/earnings"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_earnings_tenant_isolation",
+      "flow": "get_earnings",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/earnings",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_earnings_summary_type_invariant",
+      "flow": "get_earnings_summary",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/earnings/summary",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_earnings_summary_auth_required",
+      "flow": "get_earnings_summary",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/earnings/summary"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_earnings_summary_tenant_isolation",
+      "flow": "get_earnings_summary",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/earnings/summary",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_payout_methods_type_invariant",
+      "flow": "list_payout_methods",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payout-methods",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_payout_methods_auth_required",
+      "flow": "list_payout_methods",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payout-methods"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_payout_methods_tenant_isolation",
+      "flow": "list_payout_methods",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/payout-methods",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_payout_method_type_invariant",
+      "flow": "add_payout_method",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payout-methods",
+        "body": {
+          "details": "test text content",
+          "is_default": true,
+          "type": "bank_transfer"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_payout_method_auth_required",
+      "flow": "add_payout_method",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payout-methods"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_payout_method_tenant_isolation",
+      "flow": "add_payout_method",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/payout-methods",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_payout_method_type_invariant",
+      "flow": "update_payout_method",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/payout-methods/:id",
+        "body": {
+          "details": "test text content",
+          "is_default": true
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_payout_method_auth_required",
+      "flow": "update_payout_method",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/payout-methods/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_payout_method_tenant_isolation",
+      "flow": "update_payout_method",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/payout-methods/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_payout_method_ownership_guard_blocks",
+      "flow": "update_payout_method",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/payout-methods/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "delete_payout_method_type_invariant",
+      "flow": "delete_payout_method",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/payout-methods/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_payout_method_auth_required",
+      "flow": "delete_payout_method",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/payout-methods/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_payout_method_tenant_isolation",
+      "flow": "delete_payout_method",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/payout-methods/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_payout_method_ownership_guard_blocks",
+      "flow": "delete_payout_method",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/payout-methods/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "request_payout_type_invariant",
+      "flow": "request_payout",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payouts",
+        "body": {
+          "amount": "10.00",
+          "currency": "eur",
+          "payout_method_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "request_payout_auth_required",
+      "flow": "request_payout",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payouts"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "request_payout_tenant_isolation",
+      "flow": "request_payout",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/payouts",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "request_payout_method_ownership_guard_blocks",
+      "flow": "request_payout",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payouts",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "request_payout_method_verified_guard_blocks",
+      "flow": "request_payout",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payouts",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "request_payout_has_balance_guard_blocks",
+      "flow": "request_payout",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/payouts",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "list_payouts_type_invariant",
+      "flow": "list_payouts",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payouts",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_payouts_auth_required",
+      "flow": "list_payouts",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payouts"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_payouts_tenant_isolation",
+      "flow": "list_payouts",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/payouts",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_payout_type_invariant",
+      "flow": "get_payout",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payouts/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_payout_auth_required",
+      "flow": "get_payout",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payouts/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_payout_tenant_isolation",
+      "flow": "get_payout",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/payouts/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_payout_ownership_guard_blocks",
+      "flow": "get_payout",
+      "category": "guard_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/payouts/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "start_conversation_type_invariant",
+      "flow": "start_conversation",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations",
+        "body": {
+          "contact_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "start_conversation_auth_required",
+      "flow": "start_conversation",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_conversation_tenant_isolation",
+      "flow": "start_conversation",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_conversation_not_self_guard_blocks",
+      "flow": "start_conversation",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "create_group_type_invariant",
+      "flow": "create_group",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/group",
+        "body": {
+          "avatar_url": "test_value",
+          "member_ids": "test text content",
+          "name": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "create_group_auth_required",
+      "flow": "create_group",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/group"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_group_tenant_isolation",
+      "flow": "create_group",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/group",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_group_type_invariant",
+      "flow": "update_group",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/conversations/:id/group",
+        "body": {
+          "avatar_url": "test_value",
+          "name": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_group_auth_required",
+      "flow": "update_group",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/conversations/:id/group"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_group_tenant_isolation",
+      "flow": "update_group",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/conversations/:id/group",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_group_is_group_guard_blocks",
+      "flow": "update_group",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/conversations/:id/group",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "update_group_is_admin_guard_blocks",
+      "flow": "update_group",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/conversations/:id/group",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "add_group_member_type_invariant",
+      "flow": "add_group_member",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/members",
+        "body": {
+          "user_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_group_member_auth_required",
+      "flow": "add_group_member",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/members"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_group_member_tenant_isolation",
+      "flow": "add_group_member",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/members",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_group_member_is_group_guard_blocks",
+      "flow": "add_group_member",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/members",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "add_group_member_is_admin_guard_blocks",
+      "flow": "add_group_member",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/members",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "remove_group_member_type_invariant",
+      "flow": "remove_group_member",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/conversations/:conv_id/members/:user_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "remove_group_member_auth_required",
+      "flow": "remove_group_member",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/conversations/:conv_id/members/:user_id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_group_member_tenant_isolation",
+      "flow": "remove_group_member",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/conversations/:conv_id/members/:user_id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_group_member_is_group_guard_blocks",
+      "flow": "remove_group_member",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/conversations/:conv_id/members/:user_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "remove_group_member_is_admin_guard_blocks",
+      "flow": "remove_group_member",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/conversations/:conv_id/members/:user_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "leave_group_type_invariant",
+      "flow": "leave_group",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/leave",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "leave_group_auth_required",
+      "flow": "leave_group",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/leave"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "leave_group_tenant_isolation",
+      "flow": "leave_group",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/leave",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "leave_group_is_group_guard_blocks",
+      "flow": "leave_group",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/leave",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "list_conversations_type_invariant",
+      "flow": "list_conversations",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_conversations_auth_required",
+      "flow": "list_conversations",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_conversations_tenant_isolation",
+      "flow": "list_conversations",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/conversations",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "send_message_type_invariant",
+      "flow": "send_message",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/messages",
+        "body": {
+          "content": "test text content",
+          "data": "test text content",
+          "reply_to_id": "00000000-0000-0000-0000-000000000001",
+          "type": "text"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "send_message_auth_required",
+      "flow": "send_message",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/messages"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "send_message_tenant_isolation",
+      "flow": "send_message",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/messages",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_messages_type_invariant",
+      "flow": "list_messages",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/messages",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_messages_auth_required",
+      "flow": "list_messages",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/messages"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_messages_tenant_isolation",
+      "flow": "list_messages",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/messages",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit_message_type_invariant",
+      "flow": "edit_message",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/messages/:id",
+        "body": {
+          "content": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "edit_message_auth_required",
+      "flow": "edit_message",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/messages/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit_message_tenant_isolation",
+      "flow": "edit_message",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/messages/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "edit_message_is_sender_guard_blocks",
+      "flow": "edit_message",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/messages/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "edit_message_within_48h_guard_blocks",
+      "flow": "edit_message",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/messages/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "delete_message_type_invariant",
+      "flow": "delete_message",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/messages/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "delete_message_auth_required",
+      "flow": "delete_message",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/messages/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_message_tenant_isolation",
+      "flow": "delete_message",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/messages/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_message_is_sender_guard_blocks",
+      "flow": "delete_message",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/messages/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "delete_message_within_48h_guard_blocks",
+      "flow": "delete_message",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/messages/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "upload_attachment_type_invariant",
+      "flow": "upload_attachment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/attachment",
+        "body": {
+          "caption": "test text content",
+          "file": "test text content",
+          "type": "photo"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "upload_attachment_auth_required",
+      "flow": "upload_attachment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/attachment"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_attachment_tenant_isolation",
+      "flow": "upload_attachment",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/attachment",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_read_type_invariant",
+      "flow": "mark_read",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/read",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "mark_read_auth_required",
+      "flow": "mark_read",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/read"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_read_tenant_isolation",
+      "flow": "mark_read",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/read",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "archive_conversation_type_invariant",
+      "flow": "archive_conversation",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/archive",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "archive_conversation_auth_required",
+      "flow": "archive_conversation",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/archive"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "archive_conversation_tenant_isolation",
+      "flow": "archive_conversation",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/archive",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "unarchive_conversation_type_invariant",
+      "flow": "unarchive_conversation",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/unarchive",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "unarchive_conversation_auth_required",
+      "flow": "unarchive_conversation",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/unarchive"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "unarchive_conversation_tenant_isolation",
+      "flow": "unarchive_conversation",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/unarchive",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_templates_type_invariant",
+      "flow": "list_templates",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/templates",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_templates_auth_required",
+      "flow": "list_templates",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/templates"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_templates_tenant_isolation",
+      "flow": "list_templates",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/templates",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_template_type_invariant",
+      "flow": "create_template",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/templates",
+        "body": {
+          "content": "test text content",
+          "sort_order": 1,
+          "title": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "create_template_auth_required",
+      "flow": "create_template",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/templates"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_template_tenant_isolation",
+      "flow": "create_template",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/templates",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_template_type_invariant",
+      "flow": "update_template",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/templates/:id",
+        "body": {
+          "content": "test text content",
+          "sort_order": 1,
+          "title": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_template_auth_required",
+      "flow": "update_template",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/templates/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_template_tenant_isolation",
+      "flow": "update_template",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/templates/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_template_ownership_guard_blocks",
+      "flow": "update_template",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/templates/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "delete_template_type_invariant",
+      "flow": "delete_template",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/templates/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_template_auth_required",
+      "flow": "delete_template",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/templates/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_template_tenant_isolation",
+      "flow": "delete_template",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/templates/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_template_ownership_guard_blocks",
+      "flow": "delete_template",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/templates/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "translate_message_type_invariant",
+      "flow": "translate_message",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/messages/:id/translate",
+        "body": {
+          "target_lang": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "translate_message_auth_required",
+      "flow": "translate_message",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/messages/:id/translate"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "translate_message_tenant_isolation",
+      "flow": "translate_message",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/messages/:id/translate",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "suggest_replies_type_invariant",
+      "flow": "suggest_replies",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/suggest",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "suggest_replies_auth_required",
+      "flow": "suggest_replies",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/suggest"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "suggest_replies_tenant_isolation",
+      "flow": "suggest_replies",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/suggest",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "summarize_conversation_type_invariant",
+      "flow": "summarize_conversation",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/summarize",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "summarize_conversation_auth_required",
+      "flow": "summarize_conversation",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/summarize"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "summarize_conversation_tenant_isolation",
+      "flow": "summarize_conversation",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/conversations/:id/summarize",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "search_messages_type_invariant",
+      "flow": "search_messages",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/search",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "search_messages_auth_required",
+      "flow": "search_messages",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/search"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "search_messages_tenant_isolation",
+      "flow": "search_messages",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/conversations/:id/search",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "chat_events_stream_connect",
+      "flow": "chat_events",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/ws/chat",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "websocket"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    },
+    {
+      "name": "chat_sse_stream_connect",
+      "flow": "chat_sse",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/events/chat",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "sse"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_categories_type_invariant",
+      "flow": "list_categories",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/categories",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_categories_auth_required",
+      "flow": "list_categories",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/categories"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_categories_tenant_isolation",
+      "flow": "list_categories",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/categories",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_category_type_invariant",
+      "flow": "get_category",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/categories/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_category_auth_required",
+      "flow": "get_category",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/categories/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_category_tenant_isolation",
+      "flow": "get_category",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/categories/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_my_services_type_invariant",
+      "flow": "list_my_services",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/my/services",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_my_services_auth_required",
+      "flow": "list_my_services",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/my/services"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_my_services_tenant_isolation",
+      "flow": "list_my_services",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/my/services",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_service_type_invariant",
+      "flow": "add_service",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/my/services",
+        "body": {
+          "category_id": "00000000-0000-0000-0000-000000000001",
+          "currency": "eur",
+          "description": "test text content",
+          "price_max": "10.00",
+          "price_min": "10.00",
+          "rate_amount": "10.00",
+          "rate_type": "hourly",
+          "service_name": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_service_auth_required",
+      "flow": "add_service",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/my/services"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_service_tenant_isolation",
+      "flow": "add_service",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/my/services",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_service_type_invariant",
+      "flow": "update_service",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/my/services/:id",
+        "body": {
+          "currency": "eur",
+          "description": "test text content",
+          "is_active": true,
+          "price_max": "10.00",
+          "price_min": "10.00",
+          "rate_amount": "10.00",
+          "rate_type": "hourly"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_service_auth_required",
+      "flow": "update_service",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/my/services/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_service_tenant_isolation",
+      "flow": "update_service",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/my/services/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_service_ownership_guard_blocks",
+      "flow": "update_service",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/my/services/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "delete_service_type_invariant",
+      "flow": "delete_service",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/my/services/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_service_auth_required",
+      "flow": "delete_service",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/my/services/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_service_tenant_isolation",
+      "flow": "delete_service",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/my/services/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_service_ownership_guard_blocks",
+      "flow": "delete_service",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/my/services/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "send_connection_request_type_invariant",
+      "flow": "send_connection_request",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/connections",
+        "body": {
+          "contact_id": "00000000-0000-0000-0000-000000000001",
+          "message": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "send_connection_request_auth_required",
+      "flow": "send_connection_request",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/connections"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "send_connection_request_tenant_isolation",
+      "flow": "send_connection_request",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/connections",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "send_connection_request_not_self_guard_blocks",
+      "flow": "send_connection_request",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/connections",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "send_connection_request_target_active_guard_blocks",
+      "flow": "send_connection_request",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/connections",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "list_connections_type_invariant",
+      "flow": "list_connections",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/connections",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_connections_auth_required",
+      "flow": "list_connections",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/connections"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_connections_tenant_isolation",
+      "flow": "list_connections",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/connections",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_incoming_requests_type_invariant",
+      "flow": "list_incoming_requests",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/connections/incoming",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_incoming_requests_auth_required",
+      "flow": "list_incoming_requests",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/connections/incoming"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_incoming_requests_tenant_isolation",
+      "flow": "list_incoming_requests",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/connections/incoming",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_connection_type_invariant",
+      "flow": "respond_connection",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/connections/:id",
+        "body": {
+          "status": "pending"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "respond_connection_auth_required",
+      "flow": "respond_connection",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/connections/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_connection_tenant_isolation",
+      "flow": "respond_connection",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/connections/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_connection_is_recipient_guard_blocks",
+      "flow": "respond_connection",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/connections/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "respond_connection_is_pending_guard_blocks",
+      "flow": "respond_connection",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/connections/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "remove_connection_type_invariant",
+      "flow": "remove_connection",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/connections/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "remove_connection_auth_required",
+      "flow": "remove_connection",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/connections/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_connection_tenant_isolation",
+      "flow": "remove_connection",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/connections/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_connection_is_participant_guard_blocks",
+      "flow": "remove_connection",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/connections/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "add_favorite_type_invariant",
+      "flow": "add_favorite",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/contacts/:contact_id/favorite",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_favorite_auth_required",
+      "flow": "add_favorite",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/contacts/:contact_id/favorite"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_favorite_tenant_isolation",
+      "flow": "add_favorite",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/contacts/:contact_id/favorite",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_favorite_type_invariant",
+      "flow": "remove_favorite",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/contacts/:contact_id/favorite",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "remove_favorite_auth_required",
+      "flow": "remove_favorite",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/contacts/:contact_id/favorite"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_favorite_tenant_isolation",
+      "flow": "remove_favorite",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/contacts/:contact_id/favorite",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "upsert_note_type_invariant",
+      "flow": "upsert_note",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/contacts/:contact_id/note",
+        "body": {
+          "note": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upsert_note_auth_required",
+      "flow": "upsert_note",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/contacts/:contact_id/note"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upsert_note_tenant_isolation",
+      "flow": "upsert_note",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/contacts/:contact_id/note",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_note_type_invariant",
+      "flow": "get_note",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/contacts/:contact_id/note",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_note_auth_required",
+      "flow": "get_note",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/contacts/:contact_id/note"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_note_tenant_isolation",
+      "flow": "get_note",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/contacts/:contact_id/note",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_folders_type_invariant",
+      "flow": "list_folders",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/folders",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_folders_auth_required",
+      "flow": "list_folders",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/folders"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_folders_tenant_isolation",
+      "flow": "list_folders",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/folders",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_folder_type_invariant",
+      "flow": "create_folder",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/folders",
+        "body": {
+          "name": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "create_folder_auth_required",
+      "flow": "create_folder",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/folders"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_folder_tenant_isolation",
+      "flow": "create_folder",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/folders",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_folder_type_invariant",
+      "flow": "update_folder",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/folders/:id",
+        "body": {
+          "name": "test_value",
+          "sort_order": 1
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_folder_auth_required",
+      "flow": "update_folder",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/folders/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_folder_tenant_isolation",
+      "flow": "update_folder",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/folders/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_folder_ownership_guard_blocks",
+      "flow": "update_folder",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/folders/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "delete_folder_type_invariant",
+      "flow": "delete_folder",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_folder_auth_required",
+      "flow": "delete_folder",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_folder_tenant_isolation",
+      "flow": "delete_folder",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_folder_ownership_guard_blocks",
+      "flow": "delete_folder",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "add_to_folder_type_invariant",
+      "flow": "add_to_folder",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/folders/:id/members",
+        "body": {
+          "contact_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_to_folder_auth_required",
+      "flow": "add_to_folder",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/folders/:id/members"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_to_folder_tenant_isolation",
+      "flow": "add_to_folder",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/folders/:id/members",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_to_folder_ownership_guard_blocks",
+      "flow": "add_to_folder",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/folders/:id/members",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "remove_from_folder_type_invariant",
+      "flow": "remove_from_folder",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:folder_id/members/:contact_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "remove_from_folder_auth_required",
+      "flow": "remove_from_folder",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:folder_id/members/:contact_id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_from_folder_tenant_isolation",
+      "flow": "remove_from_folder",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:folder_id/members/:contact_id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_from_folder_ownership_guard_blocks",
+      "flow": "remove_from_folder",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/folders/:folder_id/members/:contact_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "search_network_type_invariant",
+      "flow": "search_network",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network/search",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "search_network_auth_required",
+      "flow": "search_network",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network/search"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "search_network_tenant_isolation",
+      "flow": "search_network",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/network/search",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "nearby_providers_type_invariant",
+      "flow": "nearby_providers",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network/nearby",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "nearby_providers_auth_required",
+      "flow": "nearby_providers",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network/nearby"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "nearby_providers_tenant_isolation",
+      "flow": "nearby_providers",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/network/nearby",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "geocode_address_type_invariant",
+      "flow": "geocode_address",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/network/geocode",
+        "body": {
+          "address": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "geocode_address_auth_required",
+      "flow": "geocode_address",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/network/geocode"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "geocode_address_tenant_isolation",
+      "flow": "geocode_address",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/network/geocode",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "distance_to_type_invariant",
+      "flow": "distance_to",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/network/distance",
+        "body": {
+          "provider_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "distance_to_auth_required",
+      "flow": "distance_to",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/network/distance"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "distance_to_tenant_isolation",
+      "flow": "distance_to",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/network/distance",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "browse_network_type_invariant",
+      "flow": "browse_network",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "browse_network_auth_required",
+      "flow": "browse_network",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/network"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "browse_network_tenant_isolation",
+      "flow": "browse_network",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/network",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_profile_type_invariant",
+      "flow": "get_profile",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:slug",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_profile_auth_required",
+      "flow": "get_profile",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:slug"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_profile_tenant_isolation",
+      "flow": "get_profile",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:slug",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_profile_is_active_guard_blocks",
+      "flow": "get_profile",
+      "category": "guard_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:slug",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 404
+        }
+      }
+    },
+    {
+      "name": "get_user_services_type_invariant",
+      "flow": "get_user_services",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/services",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_user_services_auth_required",
+      "flow": "get_user_services",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/services"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_user_services_tenant_isolation",
+      "flow": "get_user_services",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/services",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_review_type_invariant",
+      "flow": "create_review",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "body": {
+          "appointment_id": "00000000-0000-0000-0000-000000000001",
+          "content": "test text content",
+          "photos": "test text content",
+          "rating": 1,
+          "reviewee_id": "00000000-0000-0000-0000-000000000001",
+          "tags": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "create_review_auth_required",
+      "flow": "create_review",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_review_tenant_isolation",
+      "flow": "create_review",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "create_review_valid_rating_min_guard_blocks",
+      "flow": "create_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "create_review_valid_rating_max_guard_blocks",
+      "flow": "create_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "create_review_not_self_guard_blocks",
+      "flow": "create_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "create_review_is_completed_guard_blocks",
+      "flow": "create_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "list_reviews_type_invariant",
+      "flow": "list_reviews",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/reviews/:user_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_reviews_auth_required",
+      "flow": "list_reviews",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/reviews/:user_id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_reviews_tenant_isolation",
+      "flow": "list_reviews",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/reviews/:user_id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_review_type_invariant",
+      "flow": "respond_review",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews/:id/respond",
+        "body": {
+          "response": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "respond_review_auth_required",
+      "flow": "respond_review",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews/:id/respond"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_review_tenant_isolation",
+      "flow": "respond_review",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/reviews/:id/respond",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "respond_review_is_reviewee_guard_blocks",
+      "flow": "respond_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews/:id/respond",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "respond_review_no_existing_response_guard_blocks",
+      "flow": "respond_review",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reviews/:id/respond",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "request_id_check_type_invariant",
+      "flow": "request_id_check",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/id-check",
+        "body": {
+          "id_back_url": "test_value",
+          "id_front_url": "test_value",
+          "selfie_url": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "request_id_check_auth_required",
+      "flow": "request_id_check",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/id-check"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "request_id_check_tenant_isolation",
+      "flow": "request_id_check",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/badges/id-check",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "request_id_check_no_pending_guard_blocks",
+      "flow": "request_id_check",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/id-check",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "upload_badge_selfie_type_invariant",
+      "flow": "upload_badge_selfie",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/selfie",
+        "body": {
+          "file": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upload_badge_selfie_auth_required",
+      "flow": "upload_badge_selfie",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/selfie"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_badge_selfie_tenant_isolation",
+      "flow": "upload_badge_selfie",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/selfie",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_front_type_invariant",
+      "flow": "upload_badge_id_front",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-front",
+        "body": {
+          "file": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_front_auth_required",
+      "flow": "upload_badge_id_front",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-front"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_front_tenant_isolation",
+      "flow": "upload_badge_id_front",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-front",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_back_type_invariant",
+      "flow": "upload_badge_id_back",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-back",
+        "body": {
+          "file": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_back_auth_required",
+      "flow": "upload_badge_id_back",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-back"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_badge_id_back_tenant_isolation",
+      "flow": "upload_badge_id_back",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/badges/document/id-back",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_badge_status_type_invariant",
+      "flow": "get_badge_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/badges/status",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_badge_status_auth_required",
+      "flow": "get_badge_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/badges/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_badge_status_tenant_isolation",
+      "flow": "get_badge_status",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/badges/status",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "open_dispute_type_invariant",
+      "flow": "open_dispute",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes",
+        "body": {
+          "appointment_id": "00000000-0000-0000-0000-000000000001",
+          "proposed_amount": "10.00",
+          "reason": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "open_dispute_auth_required",
+      "flow": "open_dispute",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "open_dispute_tenant_isolation",
+      "flow": "open_dispute",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/disputes",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "open_dispute_is_completed_guard_blocks",
+      "flow": "open_dispute",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "counter_dispute_type_invariant",
+      "flow": "counter_dispute",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/disputes/:id",
+        "body": {
+          "counter_amount": "10.00"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "counter_dispute_auth_required",
+      "flow": "counter_dispute",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/disputes/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "counter_dispute_tenant_isolation",
+      "flow": "counter_dispute",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/disputes/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "counter_dispute_is_open_guard_blocks",
+      "flow": "counter_dispute",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/disputes/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "counter_dispute_is_party_guard_blocks",
+      "flow": "counter_dispute",
+      "category": "guard_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/disputes/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "resolve_dispute_type_invariant",
+      "flow": "resolve_dispute",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes/:id/resolve",
+        "body": {
+          "resolution": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "resolve_dispute_auth_required",
+      "flow": "resolve_dispute",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes/:id/resolve"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "resolve_dispute_tenant_isolation",
+      "flow": "resolve_dispute",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/disputes/:id/resolve",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "resolve_dispute_is_open_guard_blocks",
+      "flow": "resolve_dispute",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes/:id/resolve",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "resolve_dispute_is_party_guard_blocks",
+      "flow": "resolve_dispute",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/disputes/:id/resolve",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "list_disputes_type_invariant",
+      "flow": "list_disputes",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/disputes",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_disputes_auth_required",
+      "flow": "list_disputes",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/disputes"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_disputes_tenant_isolation",
+      "flow": "list_disputes",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/disputes",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "submit_report_type_invariant",
+      "flow": "submit_report",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reports",
+        "body": {
+          "description": "test text content",
+          "evidence": "test text content",
+          "reason": "inappropriate",
+          "reported_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "submit_report_auth_required",
+      "flow": "submit_report",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reports"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "submit_report_tenant_isolation",
+      "flow": "submit_report",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/reports",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "submit_report_not_self_guard_blocks",
+      "flow": "submit_report",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/reports",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "get_provider_profile_type_invariant",
+      "flow": "get_provider_profile",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/profile",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_provider_profile_auth_required",
+      "flow": "get_provider_profile",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/profile"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upsert_provider_profile_type_invariant",
+      "flow": "upsert_provider_profile",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/provider/profile",
+        "body": {
+          "certifications": "test text content",
+          "experience_years": 1,
+          "profession": "test_value",
+          "working_schedule": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upsert_provider_profile_auth_required",
+      "flow": "upsert_provider_profile",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/provider/profile"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_onboarding_status_type_invariant",
+      "flow": "get_onboarding_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/onboarding",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_onboarding_status_auth_required",
+      "flow": "get_onboarding_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/onboarding"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_onboarding_status_tenant_isolation",
+      "flow": "get_onboarding_status",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/provider/onboarding",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_onboarding_type_invariant",
+      "flow": "start_onboarding",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "start_onboarding_auth_required",
+      "flow": "start_onboarding",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_onboarding_tenant_isolation",
+      "flow": "start_onboarding",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_onboarding_not_started_guard_blocks",
+      "flow": "start_onboarding",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "advance_onboarding_type_invariant",
+      "flow": "advance_onboarding",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding/advance",
+        "body": {
+          "step": "profile"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "advance_onboarding_auth_required",
+      "flow": "advance_onboarding",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding/advance"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "advance_onboarding_tenant_isolation",
+      "flow": "advance_onboarding",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/provider/onboarding/advance",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_availability_type_invariant",
+      "flow": "list_availability",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/availability",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_availability_auth_required",
+      "flow": "list_availability",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/availability"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "set_availability_type_invariant",
+      "flow": "set_availability",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/availability",
+        "body": {
+          "day_of_week": 1,
+          "end_time": "test_value",
+          "is_active": true,
+          "start_time": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "set_availability_auth_required",
+      "flow": "set_availability",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/availability"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "set_availability_valid_day_guard_blocks",
+      "flow": "set_availability",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/availability",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "set_availability_valid_day_min_guard_blocks",
+      "flow": "set_availability",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/provider/availability",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "delete_availability_type_invariant",
+      "flow": "delete_availability",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/provider/availability/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_availability_auth_required",
+      "flow": "delete_availability",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/provider/availability/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_availability_ownership_guard_blocks",
+      "flow": "delete_availability",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/provider/availability/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "set_status_type_invariant",
+      "flow": "set_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/provider/status",
+        "body": {
+          "status": "available",
+          "until_date": "2025-01-01T00:00:00Z"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "set_status_auth_required",
+      "flow": "set_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/provider/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_status_type_invariant",
+      "flow": "get_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/status",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_status_auth_required",
+      "flow": "get_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/provider/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "propose_appointment_type_invariant",
+      "flow": "propose_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments",
+        "body": {
+          "client_id": "00000000-0000-0000-0000-000000000001",
+          "conversation_id": "00000000-0000-0000-0000-000000000001",
+          "end_at": "2025-01-01T00:00:00Z",
+          "location": "test_value",
+          "notes": "test text content",
+          "provider_id": "00000000-0000-0000-0000-000000000001",
+          "services": "test text content",
+          "start_at": "2025-01-01T00:00:00Z",
+          "title": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "propose_appointment_auth_required",
+      "flow": "propose_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "propose_appointment_valid_time_guard_blocks",
+      "flow": "propose_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "propose_appointment_future_guard_blocks",
+      "flow": "propose_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "list_appointments_type_invariant",
+      "flow": "list_appointments",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/appointments",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_appointments_auth_required",
+      "flow": "list_appointments",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/appointments"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_appointment_type_invariant",
+      "flow": "get_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/appointments/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_appointment_auth_required",
+      "flow": "get_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/appointments/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_appointment_is_participant_guard_blocks",
+      "flow": "get_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/appointments/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "confirm_appointment_type_invariant",
+      "flow": "confirm_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "confirm_appointment_auth_required",
+      "flow": "confirm_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/confirm"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "confirm_appointment_is_pending_guard_blocks",
+      "flow": "confirm_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/confirm",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "dismiss_appointment_type_invariant",
+      "flow": "dismiss_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/dismiss",
+        "body": {
+          "reason": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "dismiss_appointment_auth_required",
+      "flow": "dismiss_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/dismiss"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "dismiss_appointment_is_actionable_guard_blocks",
+      "flow": "dismiss_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/dismiss",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "cancel_appointment_type_invariant",
+      "flow": "cancel_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/cancel",
+        "body": {
+          "reason": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "cancel_appointment_auth_required",
+      "flow": "cancel_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/cancel"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "cancel_appointment_is_cancelable_guard_blocks",
+      "flow": "cancel_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/cancel",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "start_appointment_type_invariant",
+      "flow": "start_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/start",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "start_appointment_auth_required",
+      "flow": "start_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/start"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "start_appointment_is_confirmed_guard_blocks",
+      "flow": "start_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/start",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "complete_appointment_type_invariant",
+      "flow": "complete_appointment",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/complete",
+        "body": {
+          "amount": "10.00",
+          "currency": "eur",
+          "work_hours": "10.00"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "complete_appointment_auth_required",
+      "flow": "complete_appointment",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/complete"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "complete_appointment_is_in_progress_guard_blocks",
+      "flow": "complete_appointment",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/complete",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "mark_no_show_type_invariant",
+      "flow": "mark_no_show",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/no-show",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "mark_no_show_auth_required",
+      "flow": "mark_no_show",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/no-show"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_no_show_is_confirmable_guard_blocks",
+      "flow": "mark_no_show",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/no-show",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "connect_calendar_type_invariant",
+      "flow": "connect_calendar",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/calendar/connect",
+        "body": {
+          "access_token": "test_value",
+          "provider": "google",
+          "refresh_token": "test_value",
+          "token_expires_at": "2025-01-01T00:00:00Z"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "connect_calendar_auth_required",
+      "flow": "connect_calendar",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/calendar/connect"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "disconnect_calendar_type_invariant",
+      "flow": "disconnect_calendar",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/calendar/:provider",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "disconnect_calendar_auth_required",
+      "flow": "disconnect_calendar",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/calendar/:provider"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_calendar_status_type_invariant",
+      "flow": "get_calendar_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/calendar/status",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_calendar_status_auth_required",
+      "flow": "get_calendar_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/calendar/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "sync_appointment_to_calendar_type_invariant",
+      "flow": "sync_appointment_to_calendar",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/calendar",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "sync_appointment_to_calendar_auth_required",
+      "flow": "sync_appointment_to_calendar",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/appointments/:id/calendar"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "remove_from_calendar_type_invariant",
+      "flow": "remove_from_calendar",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/appointments/:id/calendar",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "remove_from_calendar_auth_required",
+      "flow": "remove_from_calendar",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/appointments/:id/calendar"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_public_availability_type_invariant",
+      "flow": "get_public_availability",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/providers/:user_id/availability",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_public_availability_auth_required",
+      "flow": "get_public_availability",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/providers/:user_id/availability"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_public_status_type_invariant",
+      "flow": "get_public_status",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/providers/:user_id/status",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_public_status_auth_required",
+      "flow": "get_public_status",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/providers/:user_id/status"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "appointment_events_stream_connect",
+      "flow": "appointment_events",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/ws/appointments",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "websocket"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    },
+    {
+      "name": "appointment_sse_stream_connect",
+      "flow": "appointment_sse",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/events/appointments",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "sse"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_settings_type_invariant",
+      "flow": "get_settings",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/settings",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_settings_auth_required",
+      "flow": "get_settings",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/settings"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_settings_tenant_isolation",
+      "flow": "get_settings",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/settings",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_settings_type_invariant",
+      "flow": "update_settings",
+      "category": "type_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/settings",
+        "body": {
+          "currency": "eur",
+          "language": "en",
+          "notification_appointments": true,
+          "notification_connections": true,
+          "notification_marketing": true,
+          "notification_messages": true,
+          "notification_network": true,
+          "notification_reviews": true,
+          "privacy_last_seen": "everyone",
+          "privacy_online_status": true,
+          "privacy_profile_visible": true,
+          "privacy_read_receipts": true,
+          "privacy_show_location": true,
+          "privacy_show_phone": true,
+          "theme": "light"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "update_settings_auth_required",
+      "flow": "update_settings",
+      "category": "auth_invariant",
+      "request": {
+        "method": "PUT",
+        "path": "/settings"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "update_settings_tenant_isolation",
+      "flow": "update_settings",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "PUT",
+        "path": "/settings",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "block_user_type_invariant",
+      "flow": "block_user",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/blocked",
+        "body": {
+          "user_id": "00000000-0000-0000-0000-000000000001"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "block_user_auth_required",
+      "flow": "block_user",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/blocked"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "block_user_tenant_isolation",
+      "flow": "block_user",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/blocked",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "block_user_not_self_guard_blocks",
+      "flow": "block_user",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/blocked",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 400
+        }
+      }
+    },
+    {
+      "name": "unblock_user_type_invariant",
+      "flow": "unblock_user",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/blocked/:user_id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "unblock_user_auth_required",
+      "flow": "unblock_user",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/blocked/:user_id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "unblock_user_tenant_isolation",
+      "flow": "unblock_user",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/blocked/:user_id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_blocked_type_invariant",
+      "flow": "list_blocked",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/blocked",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_blocked_auth_required",
+      "flow": "list_blocked",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/blocked"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_blocked_tenant_isolation",
+      "flow": "list_blocked",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/blocked",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_notifications_type_invariant",
+      "flow": "list_notifications",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/notifications",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_notifications_auth_required",
+      "flow": "list_notifications",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/notifications"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_notifications_tenant_isolation",
+      "flow": "list_notifications",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/notifications",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_notification_read_type_invariant",
+      "flow": "mark_notification_read",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/:id/read",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "mark_notification_read_auth_required",
+      "flow": "mark_notification_read",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/:id/read"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_notification_read_tenant_isolation",
+      "flow": "mark_notification_read",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/:id/read",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_notification_read_ownership_guard_blocks",
+      "flow": "mark_notification_read",
+      "category": "guard_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/:id/read",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "mark_all_read_type_invariant",
+      "flow": "mark_all_read",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/read-all",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "mark_all_read_auth_required",
+      "flow": "mark_all_read",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/read-all"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "mark_all_read_tenant_isolation",
+      "flow": "mark_all_read",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/notifications/read-all",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "unread_count_type_invariant",
+      "flow": "unread_count",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/notifications/unread-count",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "unread_count_auth_required",
+      "flow": "unread_count",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/notifications/unread-count"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "unread_count_tenant_isolation",
+      "flow": "unread_count",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/notifications/unread-count",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "register_device_type_invariant",
+      "flow": "register_device",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/devices",
+        "body": {
+          "platform": "ios",
+          "token": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "register_device_auth_required",
+      "flow": "register_device",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/devices"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "register_device_tenant_isolation",
+      "flow": "register_device",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/devices",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "unregister_device_type_invariant",
+      "flow": "unregister_device",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/devices/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "unregister_device_auth_required",
+      "flow": "unregister_device",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/devices/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "unregister_device_tenant_isolation",
+      "flow": "unregister_device",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/devices/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "unregister_device_ownership_guard_blocks",
+      "flow": "unregister_device",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/devices/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "upload_avatar_type_invariant",
+      "flow": "upload_avatar",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/avatar/upload",
+        "body": {
+          "file": "test text content"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "upload_avatar_auth_required",
+      "flow": "upload_avatar",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/avatar/upload"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_avatar_tenant_isolation",
+      "flow": "upload_avatar",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/avatar/upload",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_gallery_image_type_invariant",
+      "flow": "upload_gallery_image",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/gallery/upload",
+        "body": {
+          "caption": "test_value",
+          "file": "test text content",
+          "sort_order": 1
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "upload_gallery_image_auth_required",
+      "flow": "upload_gallery_image",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/gallery/upload"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "upload_gallery_image_tenant_isolation",
+      "flow": "upload_gallery_image",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/gallery/upload",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_gallery_type_invariant",
+      "flow": "list_gallery",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/gallery",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "list_gallery_auth_required",
+      "flow": "list_gallery",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/gallery"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "list_gallery_tenant_isolation",
+      "flow": "list_gallery",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/gallery",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_gallery_image_type_invariant",
+      "flow": "add_gallery_image",
+      "category": "type_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/gallery",
+        "body": {
+          "caption": "test_value",
+          "sort_order": 1,
+          "url": "test_value"
+        },
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 201
+        }
+      }
+    },
+    {
+      "name": "add_gallery_image_auth_required",
+      "flow": "add_gallery_image",
+      "category": "auth_invariant",
+      "request": {
+        "method": "POST",
+        "path": "/gallery"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "add_gallery_image_tenant_isolation",
+      "flow": "add_gallery_image",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "POST",
+        "path": "/gallery",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_gallery_image_type_invariant",
+      "flow": "delete_gallery_image",
+      "category": "type_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/gallery/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 204
+        }
+      }
+    },
+    {
+      "name": "delete_gallery_image_auth_required",
+      "flow": "delete_gallery_image",
+      "category": "auth_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/gallery/:id"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_gallery_image_tenant_isolation",
+      "flow": "delete_gallery_image",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "DELETE",
+        "path": "/gallery/:id",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "delete_gallery_image_ownership_guard_blocks",
+      "flow": "delete_gallery_image",
+      "category": "guard_invariant",
+      "request": {
+        "method": "DELETE",
+        "path": "/gallery/:id",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 403
+        }
+      }
+    },
+    {
+      "name": "get_public_gallery_type_invariant",
+      "flow": "get_public_gallery",
+      "category": "type_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/gallery",
+        "auth": "valid_token"
+      },
+      "expected": {
+        "status": {
+          "exactly": 200
+        }
+      }
+    },
+    {
+      "name": "get_public_gallery_auth_required",
+      "flow": "get_public_gallery",
+      "category": "auth_invariant",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/gallery"
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            401,
+            403
+          ]
+        }
+      }
+    },
+    {
+      "name": "get_public_gallery_tenant_isolation",
+      "flow": "get_public_gallery",
+      "category": "tenant_isolation",
+      "request": {
+        "method": "GET",
+        "path": "/profile/:user_id/gallery",
+        "auth": "user_a_token"
+      },
+      "expected": {
+        "status": {
+          "not": [
+            500
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification_events_stream_connect",
+      "flow": "notification_events",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/ws/notifications",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "websocket"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    },
+    {
+      "name": "notification_sse_stream_connect",
+      "flow": "notification_sse",
+      "category": "stream_connect",
+      "request": {
+        "method": "GET",
+        "path": "/events/notifications",
+        "auth": "valid_token",
+        "headers": [
+          [
+            "Upgrade",
+            "sse"
+          ]
+        ]
+      },
+      "expected": {
+        "status": {
+          "one_of": [
+            101,
+            200
+          ]
+        }
+      }
+    }
+  ]
+}

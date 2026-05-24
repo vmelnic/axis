@@ -1,0 +1,448 @@
+SHAPE UserSettings
+  user_id UUID PK REF User.id
+  notification_messages BOOL DEFAULT true
+  notification_connections BOOL DEFAULT true
+  notification_appointments BOOL DEFAULT true
+  notification_reviews BOOL DEFAULT true
+  notification_network BOOL DEFAULT false
+  notification_marketing BOOL DEFAULT false
+  privacy_profile_visible BOOL DEFAULT true
+  privacy_show_phone BOOL DEFAULT false
+  privacy_show_location BOOL DEFAULT true
+  privacy_last_seen ENUM everyone contacts nobody DEFAULT everyone
+  privacy_read_receipts BOOL DEFAULT true
+  privacy_online_status BOOL DEFAULT true
+  language ENUM en ro ru DEFAULT en
+  currency ENUM EUR MDL USD DEFAULT EUR
+  theme ENUM light dark system DEFAULT system
+  updated_at TIMESTAMP AUTO
+
+SHAPE BlockedUser
+  id UUID PK AUTO
+  blocker_id UUID REF User.id REQUIRED
+  blocked_id UUID REF User.id REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE Notification
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  type ENUM message_received appointment_proposed appointment_confirmed appointment_cancelled appointment_reminder connection_request connection_accepted review_received contact_joined service_completed dispute_opened welcome badge_reviewed subscription_changed REQUIRED
+  title STRING 255 REQUIRED
+  body TEXT
+  data TEXT
+  read BOOL DEFAULT false
+  created_at TIMESTAMP AUTO
+
+SHAPE DeviceToken
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  platform ENUM ios android web REQUIRED
+  token STRING 500 REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE GalleryImage
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  url STRING 500 REQUIRED
+  caption STRING 500
+  sort_order INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+
+SOURCE user_settings POSTGRES
+  SHAPE UserSettings
+  INDEX user_id
+
+SOURCE blocked_users POSTGRES
+  SHAPE BlockedUser
+  INDEX blocker_id
+  INDEX blocked_id
+  INDEX blocker_id blocked_id UNIQUE
+
+SOURCE notifications POSTGRES
+  SHAPE Notification
+  INDEX user_id
+  INDEX user_id read
+  INDEX created_at DESC
+
+SOURCE device_tokens POSTGRES
+  SHAPE DeviceToken
+  INDEX user_id
+  INDEX user_id token UNIQUE
+
+SOURCE gallery_images POSTGRES
+  SHAPE GalleryImage
+  INDEX user_id
+  INDEX user_id sort_order
+
+SERVICE email
+  ENDPOINT EMAIL_SERVICE_URL
+  AUTH bearer VAULT SENDGRID_API_KEY
+  METHOD send
+    INPUT to STRING 255
+    INPUT subject STRING 255
+    INPUT body TEXT
+    INPUT html BOOL
+    OUTPUT success BOOL
+    OUTPUT message_id STRING 255
+    TIMEOUT 10s
+    RETRY 2 BACKOFF exponential
+  METHOD send_otp
+    INPUT to STRING 255
+    INPUT template_id STRING 100
+    INPUT variables TEXT
+    OUTPUT code STRING 10
+    OUTPUT success BOOL
+    OUTPUT message_id STRING 255
+    TIMEOUT 10s
+    RETRY 2 BACKOFF exponential
+  METHOD send_template
+    INPUT to STRING 255
+    INPUT template_id STRING 100
+    INPUT variables TEXT
+    OUTPUT success BOOL
+    OUTPUT message_id STRING 255
+    TIMEOUT 10s
+    RETRY 2 BACKOFF exponential
+
+SERVICE push
+  ENDPOINT PUSH_SERVICE_URL
+  AUTH bearer VAULT FCM_SERVER_KEY
+  METHOD send_notification
+    INPUT user_id UUID
+    INPUT title STRING 255
+    INPUT body TEXT
+    INPUT data TEXT
+    TIMEOUT 5s
+    RETRY 2 BACKOFF exponential
+
+SERVICE storage
+  ENDPOINT STORAGE_SERVICE_URL
+  AUTH bearer VAULT S3_ACCESS_KEY
+  METHOD presign_upload
+    INPUT key STRING 500
+    INPUT content_type STRING 100
+    OUTPUT upload_url STRING 500
+    OUTPUT public_url STRING 500
+    TIMEOUT 5s
+  METHOD delete_object
+    INPUT key STRING 500
+    OUTPUT deleted BOOL
+    TIMEOUT 5s
+
+REALM settings_realm
+  TENANT user_id
+  CAPABILITY read user_settings
+  CAPABILITY write user_settings
+  CAPABILITY read blocked_users
+  CAPABILITY write blocked_users
+  CAPABILITY read notifications
+  CAPABILITY write notifications
+  CAPABILITY read device_tokens
+  CAPABILITY write device_tokens
+  CAPABILITY read gallery_images
+  CAPABILITY write gallery_images
+  CAPABILITY call push
+  CAPABILITY call storage
+  CAPABILITY call email
+  CAPABILITY read users
+  CAPABILITY write users
+
+-- Settings
+FLOW get_settings get /settings
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET settings
+    FETCH user_settings
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  RETURN 200
+    settings settings
+
+FLOW update_settings put /settings
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateSettings
+    notification_messages BOOL
+    notification_connections BOOL
+    notification_appointments BOOL
+    notification_reviews BOOL
+    notification_network BOOL
+    notification_marketing BOOL
+    privacy_profile_visible BOOL
+    privacy_show_phone BOOL
+    privacy_show_location BOOL
+    privacy_last_seen ENUM everyone contacts nobody
+    privacy_read_receipts BOOL
+    privacy_online_status BOOL
+    language ENUM en ro ru
+    currency ENUM EUR MDL USD
+    theme ENUM light dark system
+  LET existing
+    FETCH user_settings
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE user_settings
+        WHERE user_id EQ auth.user_id
+        SET notification_messages body.notification_messages
+        SET notification_connections body.notification_connections
+        SET notification_appointments body.notification_appointments
+        SET notification_reviews body.notification_reviews
+        SET notification_network body.notification_network
+        SET notification_marketing body.notification_marketing
+        SET privacy_profile_visible body.privacy_profile_visible
+        SET privacy_show_phone body.privacy_show_phone
+        SET privacy_show_location body.privacy_show_location
+        SET privacy_last_seen body.privacy_last_seen
+        SET privacy_read_receipts body.privacy_read_receipts
+        SET privacy_online_status body.privacy_online_status
+        SET language body.language
+        SET currency body.currency
+        SET theme body.theme
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT user_settings
+        user_id auth.user_id
+        notification_messages body.notification_messages
+        notification_connections body.notification_connections
+        notification_appointments body.notification_appointments
+        notification_reviews body.notification_reviews
+        notification_network body.notification_network
+        notification_marketing body.notification_marketing
+        privacy_profile_visible body.privacy_profile_visible
+        privacy_show_phone body.privacy_show_phone
+        privacy_show_location body.privacy_show_location
+        privacy_last_seen body.privacy_last_seen
+        privacy_read_receipts body.privacy_read_receipts
+        privacy_online_status body.privacy_online_status
+        language body.language
+        currency body.currency
+        theme body.theme
+      AS updated
+  RETURN 200 updated
+
+-- Blocked users
+FLOW block_user post /blocked
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY BlockUser
+    user_id UUID REQUIRED
+  GUARD not_self 400 "cannot block yourself"
+    NEQ body.user_id auth.user_id
+  INSERT blocked_users
+    blocker_id auth.user_id
+    blocked_id body.user_id
+  AS blocked
+  RETURN 201 blocked
+
+FLOW unblock_user delete /blocked/:user_id
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  DELETE blocked_users
+    WHERE blocker_id EQ auth.user_id
+    WHERE blocked_id EQ path.user_id
+  OR 404 "not blocked"
+  RETURN 204
+
+FLOW list_blocked get /blocked
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET blocked
+    QUERY blocked_users
+      FILTER blocker_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 100
+  RETURN 200 blocked
+
+-- Notifications
+FLOW list_notifications get /notifications
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET notifs
+    QUERY notifications
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 notifs
+
+FLOW mark_notification_read post /notifications/:id/read
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET notif
+    FETCH notifications
+      FILTER id EQ path.id
+    OR 404 "notification not found"
+  GUARD ownership 403 "not your notification"
+    EQ notif.user_id auth.user_id
+  UPDATE notifications
+    WHERE id EQ path.id
+    SET read true
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW mark_all_read post /notifications/read-all
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET unread
+    QUERY notifications
+      FILTER user_id EQ auth.user_id
+      FILTER read EQ false
+      PAGE_SIZE 500
+  UPDATE notifications
+    WHERE user_id EQ auth.user_id
+    SET read true
+  AS updated
+  OR 0 "ok"
+  RETURN 200
+    updated true
+
+FLOW unread_count get /notifications/unread-count
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET unread
+    QUERY notifications
+      FILTER user_id EQ auth.user_id
+      FILTER read EQ false
+      PAGE_SIZE 1
+  RETURN 200
+    count unread.total
+
+-- Device tokens (push notifications)
+FLOW register_device post /devices
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY RegisterDevice
+    platform ENUM ios android web REQUIRED
+    token STRING 500 REQUIRED
+  INSERT device_tokens
+    user_id auth.user_id
+    platform body.platform
+    token body.token
+  AS device
+  RETURN 201 device
+
+FLOW unregister_device delete /devices/:id
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET device
+    FETCH device_tokens
+      FILTER id EQ path.id
+    OR 404 "device not found"
+  GUARD ownership 403 "not your device"
+    EQ device.user_id auth.user_id
+  DELETE device_tokens
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- Upload flows (avatar + gallery)
+FLOW upload_avatar post /avatar/upload
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_day per_user
+  BODY AvatarUpload
+    file TEXT REQUIRED
+  UPLOAD body.file -> avatars AS avatar_url
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET avatar_url avatar_url
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW upload_gallery_image post /gallery/upload
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 per_day per_user
+  BODY GalleryUpload
+    file TEXT REQUIRED
+    caption STRING 500
+    sort_order INT
+  UPLOAD body.file -> avatars AS image_url
+  INSERT gallery_images
+    user_id auth.user_id
+    url image_url
+    caption body.caption
+    sort_order body.sort_order
+  AS image
+  RETURN 201 image
+
+-- Gallery (provider portfolio)
+FLOW list_gallery get /gallery
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET images
+    QUERY gallery_images
+      FILTER user_id EQ auth.user_id
+      SORT sort_order ASC
+      PAGE_SIZE 20
+  RETURN 200 images
+
+FLOW add_gallery_image post /gallery
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 per_day per_user
+  BODY AddImage
+    url STRING 500 REQUIRED
+    caption STRING 500
+    sort_order INT
+  INSERT gallery_images
+    user_id auth.user_id
+    url body.url
+    caption body.caption
+    sort_order body.sort_order
+  AS image
+  RETURN 201 image
+
+FLOW delete_gallery_image delete /gallery/:id
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET image
+    FETCH gallery_images
+      FILTER id EQ path.id
+    OR 404 "image not found"
+  GUARD ownership 403 "not your image"
+    EQ image.user_id auth.user_id
+  DELETE gallery_images
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+FLOW get_public_gallery get /profile/:user_id/gallery
+  REALM settings_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET images
+    QUERY gallery_images
+      FILTER user_id EQ path.user_id
+      SORT sort_order ASC
+      PAGE_SIZE 20
+  RETURN 200 images
+
+-- Real-time notifications
+STREAM notification_events ws /ws/notifications
+  REALM settings_realm
+  AUTH session
+
+STREAM notification_sse sse /events/notifications
+  REALM settings_realm
+  AUTH session

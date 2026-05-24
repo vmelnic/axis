@@ -1,0 +1,263 @@
+SHAPE Account
+  id UUID PK AUTO
+  user_id STRING 255 REQUIRED
+  email STRING 255 REQUIRED UNIQUE
+  role ENUM admin user viewer DEFAULT user
+  balance DECIMAL PRECISION 12 SCALE 2 DEFAULT 0.00
+  verified BOOL DEFAULT false
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Expense
+  id UUID PK AUTO
+  account_id UUID REF Account.id REQUIRED
+  user_id STRING 255 REQUIRED
+  title STRING 200 REQUIRED
+  amount DECIMAL PRECISION 12 SCALE 2 REQUIRED
+  category ENUM food travel tech misc REQUIRED
+  note TEXT
+  approved BOOL DEFAULT false
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE accounts POSTGRES
+  SHAPE Account
+  INDEX user_id UNIQUE
+  INDEX email UNIQUE
+  INDEX id
+
+SOURCE expenses POSTGRES
+  SHAPE Expense
+  INDEX user_id created_at DESC
+  INDEX account_id
+  INDEX category
+
+REALM expense_api
+  TENANT user_id
+  CAPABILITY read accounts
+  CAPABILITY write accounts
+  CAPABILITY read expenses
+  CAPABILITY write expenses
+
+FUNC scale_amount
+  INPUT base DECIMAL
+  INPUT factor DECIMAL
+  OUTPUT DECIMAL
+  LET result
+    MUL base factor
+  RETURN result
+
+FUNC make_label
+  INPUT prefix STRING 100
+  INPUT suffix STRING 200
+  OUTPUT STRING 500
+  LET label
+    CONCAT prefix suffix
+  RETURN label
+
+FLOW register post /register
+  BODY RegisterInput
+    email STRING 255 REQUIRED
+    user_id STRING 255 REQUIRED
+  INSERT accounts
+    user_id body.user_id
+    email body.email
+  AS account
+  RETURN 201 account
+
+FLOW get_me get /me
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET account
+    FETCH accounts
+      FILTER user_id EQ auth.user_id
+    OR 404 "account not found"
+  RETURN 200 account
+
+FLOW list_expenses get /expenses
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 60 per_minute per_user
+  CACHE 30 VARY auth.user_id
+  PARAM category MAYBE ENUM food travel tech misc
+  LET expenses
+    QUERY expenses
+      FILTER user_id EQ auth.user_id
+      FILTER category EQ query.category
+      SORT created_at DESC
+      PAGE_SIZE 20
+  RETURN 200 expenses
+
+FLOW get_expense get /expenses/:id
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET expense
+    FETCH expenses
+      FILTER id EQ path.id
+    OR 404 "expense not found"
+  GUARD ownership 403 "not your expense"
+    EQ expense.user_id auth.user_id
+  RETURN 200 expense
+
+FLOW create_expense post /expenses
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_minute per_user
+  BODY NewExpense
+    title STRING 200 REQUIRED
+    amount DECIMAL REQUIRED
+    category ENUM food travel tech misc REQUIRED
+    note TEXT
+  RULE must_be_verified
+    REQUIRE auth.verified EQ true
+  GUARD amount_positive 400 "amount must be positive"
+    GT body.amount 0.00
+  GUARD amount_reasonable 400 "amount exceeds limit"
+    LTE body.amount 50000.00
+  LET account
+    FETCH accounts
+      FILTER user_id EQ auth.user_id
+    OR 404 "account not found"
+  LET doubled
+    FUNC scale_amount body.amount 2.00
+  INSERT expenses
+    user_id auth.user_id
+    account_id account.id
+    title body.title
+    amount body.amount
+    category body.category
+    note body.note
+  AS expense
+  RETURN 201 expense
+
+FLOW update_expense put /expenses/:id
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateExpense
+    title STRING 200
+    note TEXT
+  LET expense
+    FETCH expenses
+      FILTER id EQ path.id
+    OR 404 "expense not found"
+  GUARD ownership 403 "not your expense"
+    EQ expense.user_id auth.user_id
+  GUARD not_approved 409 "cannot edit approved expense"
+    EQ expense.approved false
+  UPDATE expenses
+    WHERE id EQ path.id
+    SET title body.title
+    SET note body.note
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW delete_expense delete /expenses/:id
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET expense
+    FETCH expenses
+      FILTER id EQ path.id
+    OR 404 "expense not found"
+  GUARD ownership 403 "not your expense"
+    EQ expense.user_id auth.user_id
+  DELETE expenses
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+FLOW get_summary get /summary
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET all_expenses
+    QUERY expenses
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 1000
+  LET counter
+    0
+  EACH item IN all_expenses.items
+    SET counter
+      ADD counter 1
+  LET uid_length
+    LENGTH auth.user_id
+  RETURN 200
+    user_id auth.user_id
+    role auth.role
+    expense_count counter
+    uid_length uid_length
+
+FLOW categorize_expense post /expenses/:id/categorize
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY CategorizeBody
+    category ENUM food travel tech misc REQUIRED
+  LET expense
+    FETCH expenses
+      FILTER id EQ path.id
+    OR 404 "expense not found"
+  GUARD ownership 403 "not your expense"
+    EQ expense.user_id auth.user_id
+  MATCH
+    WHEN EQ body.category "food"
+      UPDATE expenses
+        WHERE id EQ path.id
+        SET category food
+      AS updated
+      OR 404
+    WHEN EQ body.category "travel"
+      UPDATE expenses
+        WHERE id EQ path.id
+        SET category travel
+      AS updated
+      OR 404
+    DEFAULT
+      UPDATE expenses
+        WHERE id EQ path.id
+        SET category misc
+      AS updated
+      OR 404
+  RETURN 200 updated
+
+FLOW approve_expense post /expenses/:id/approve
+  REALM expense_api
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET expense
+    FETCH expenses
+      FILTER id EQ path.id
+    OR 404 "expense not found"
+  GUARD ownership 403 "not your expense"
+    EQ expense.user_id auth.user_id
+  TRY
+    UPDATE expenses
+      WHERE id EQ path.id
+      SET approved true
+    AS approved_expense
+    OR 500
+  RECOVER
+    LET approved_expense
+      FETCH expenses
+        FILTER id EQ path.id
+      OR 404
+  RETURN 200 approved_expense
+
+SURFACE api v1
+  REALM expense_api
+  BASE_PATH /api/v1
+  ROUTE GET /me -> get_me
+  ROUTE GET /expenses -> list_expenses
+  ROUTE GET /expenses/:id -> get_expense
+  ROUTE POST /expenses -> create_expense
+  ROUTE PUT /expenses/:id -> update_expense
+  ROUTE GET /summary -> get_summary
+  ROUTE POST /expenses/:id/categorize -> categorize_expense
+  ROUTE POST /expenses/:id/approve -> approve_expense

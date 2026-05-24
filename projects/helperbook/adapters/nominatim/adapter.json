@@ -1,0 +1,33 @@
+{
+  "name": "nominatim",
+  "version": "0.1.0",
+  "description": "Geocoding and routing via Nominatim (OpenStreetMap) + OSRM — free, no API key",
+  "service": "geo",
+  "methods": ["geocode", "reverse_geocode", "distance"],
+  "provider": "openstreetmap",
+  "config": {
+    "base_url": { "env": "NOMINATIM_URL", "required": false, "default": "https://nominatim.openstreetmap.org" },
+    "user_agent": { "env": "NOMINATIM_USER_AGENT", "required": true }
+  },
+  "endpoints": {
+    "geocode": {
+      "method": "GET",
+      "url": "${NOMINATIM_URL}/search?q=${query}&format=jsonv2&limit=1",
+      "input": { "address": "string" },
+      "output": { "lat": "decimal", "lng": "decimal", "formatted_address": "string" }
+    },
+    "reverse_geocode": {
+      "method": "GET",
+      "url": "${NOMINATIM_URL}/reverse?lat=${lat}&lon=${lng}&format=jsonv2",
+      "input": { "lat": "decimal", "lng": "decimal" },
+      "output": { "address": "string", "city": "string", "country": "string" }
+    },
+    "distance": {
+      "method": "GET",
+      "url": "https://router.project-osrm.org/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=false",
+      "input": { "lat1": "decimal", "lng1": "decimal", "lat2": "decimal", "lng2": "decimal" },
+      "output": { "meters": "int", "duration_seconds": "int" }
+    }
+  },
+  "hot_swap": true
+}

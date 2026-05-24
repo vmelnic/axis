@@ -1,0 +1,27 @@
+{
+  "name": "google-oauth",
+  "version": "0.1.0",
+  "description": "Google OAuth 2.0 social login — ID token verification + profile",
+  "service": "google_auth",
+  "methods": ["verify_token", "get_profile"],
+  "provider": "google",
+  "config": {
+    "client_id": { "env": "GOOGLE_OAUTH_CLIENT_ID", "required": true },
+    "client_secret": { "env": "GOOGLE_OAUTH_CLIENT_SECRET", "required": true, "secret": true }
+  },
+  "endpoints": {
+    "verify_token": {
+      "method": "GET",
+      "url": "https://oauth2.googleapis.com/tokeninfo?id_token=${token}",
+      "input": { "token": "string" },
+      "output": { "sub": "string", "email": "string", "name": "string", "picture": "string", "email_verified": "bool" }
+    },
+    "get_profile": {
+      "method": "GET",
+      "url": "https://www.googleapis.com/oauth2/v3/userinfo",
+      "input": { "access_token": "string" },
+      "output": { "sub": "string", "email": "string", "name": "string", "picture": "string" }
+    }
+  },
+  "hot_swap": true
+}

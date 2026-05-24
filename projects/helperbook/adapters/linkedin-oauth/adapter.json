@@ -1,0 +1,28 @@
+{
+  "name": "linkedin-oauth",
+  "version": "0.1.0",
+  "description": "LinkedIn OAuth 2.0 social login (OpenID Connect)",
+  "service": "linkedin_auth",
+  "methods": ["exchange_code", "get_profile"],
+  "provider": "linkedin",
+  "config": {
+    "client_id": { "env": "LINKEDIN_CLIENT_ID", "required": true },
+    "client_secret": { "env": "LINKEDIN_CLIENT_SECRET", "required": true, "secret": true },
+    "redirect_uri": { "env": "LINKEDIN_REDIRECT_URI", "required": true }
+  },
+  "endpoints": {
+    "exchange_code": {
+      "method": "POST",
+      "url": "https://www.linkedin.com/oauth/v2/accessToken",
+      "input": { "code": "string" },
+      "output": { "access_token": "string", "expires_in": "int" }
+    },
+    "get_profile": {
+      "method": "GET",
+      "url": "https://api.linkedin.com/v2/userinfo",
+      "input": { "access_token": "string" },
+      "output": { "sub": "string", "email": "string", "name": "string", "picture": "string" }
+    }
+  },
+  "hot_swap": true
+}

@@ -1,0 +1,22 @@
+{
+  "name": "firebase-fcm",
+  "version": "0.1.0",
+  "description": "Push notifications via Firebase Cloud Messaging v1 API",
+  "service": "push",
+  "methods": ["send_notification"],
+  "provider": "fcm",
+  "config": {
+    "project_id": { "env": "FCM_PROJECT_ID", "required": true },
+    "server_key": { "env": "FCM_SERVER_KEY", "required": true, "secret": true },
+    "service_account": { "env": "FCM_SERVICE_ACCOUNT_JSON", "required": false, "secret": true }
+  },
+  "endpoints": {
+    "send_notification": {
+      "method": "POST",
+      "url": "https://fcm.googleapis.com/v1/projects/${FCM_PROJECT_ID}/messages:send",
+      "input": { "user_id": "uuid", "title": "string", "body": "string", "data": "string" },
+      "output": { "message_id": "string", "success": "bool" }
+    }
+  },
+  "hot_swap": true
+}

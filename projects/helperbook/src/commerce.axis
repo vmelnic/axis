@@ -1,0 +1,342 @@
+SHAPE Subscription
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  plan ENUM free plus DEFAULT free
+  status ENUM active cancelled expired DEFAULT active
+  payment_provider ENUM stripe apple google
+  provider_subscription_id STRING 255
+  started_at TIMESTAMP AUTO
+  expires_at TIMESTAMP
+  cancelled_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE BillingHistory
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  amount INT REQUIRED
+  currency ENUM EUR MDL USD DEFAULT USD
+  description STRING 500 REQUIRED
+  status ENUM paid refunded DEFAULT paid
+  payment_provider ENUM stripe apple google
+  provider_transaction_id STRING 255
+  created_at TIMESTAMP AUTO
+
+SHAPE ServiceHistory
+  id UUID PK AUTO
+  appointment_id UUID REF Appointment.id REQUIRED
+  client_id UUID REF User.id REQUIRED
+  provider_id UUID REF User.id REQUIRED
+  services TEXT
+  hours_worked DECIMAL PRECISION 6 SCALE 2
+  rate DECIMAL PRECISION 10 SCALE 2
+  total_amount DECIMAL PRECISION 10 SCALE 2
+  currency ENUM EUR MDL USD DEFAULT EUR
+  status ENUM confirmed disputed DEFAULT confirmed
+  completed_at TIMESTAMP REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE Referral
+  id UUID PK AUTO
+  referrer_id UUID REF User.id REQUIRED
+  referred_id UUID REF User.id REQUIRED
+  referral_code STRING 50 REQUIRED
+  status ENUM pending completed rewarded DEFAULT pending
+  reward_type ENUM plus_week
+  rewarded_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+
+SOURCE subscriptions POSTGRES
+  SHAPE Subscription
+  INDEX user_id
+  INDEX status
+  INDEX expires_at
+
+SOURCE billing_history POSTGRES
+  SHAPE BillingHistory
+  INDEX user_id
+  INDEX created_at DESC
+
+SOURCE service_history POSTGRES
+  SHAPE ServiceHistory
+  INDEX client_id
+  INDEX provider_id
+  INDEX appointment_id
+  INDEX completed_at DESC
+
+SOURCE referrals POSTGRES
+  SHAPE Referral
+  INDEX referrer_id
+  INDEX referred_id
+  INDEX referral_code
+
+SERVICE payment
+  ENDPOINT PAYMENT_SERVICE_URL
+  AUTH bearer VAULT STRIPE_SECRET_KEY
+  METHOD create_checkout
+    INPUT user_id UUID
+    INPUT plan STRING 20
+    INPUT return_url STRING 500
+    OUTPUT checkout_url STRING 500
+    OUTPUT session_id STRING 255
+    TIMEOUT 15s
+    RETRY 1 BACKOFF exponential
+  METHOD verify_receipt
+    INPUT provider STRING 20
+    INPUT receipt_data TEXT
+    OUTPUT valid BOOL
+    OUTPUT plan STRING 20
+    OUTPUT expires_at STRING 50
+    TIMEOUT 10s
+
+REALM commerce_realm
+  TENANT user_id
+  CAPABILITY read subscriptions
+  CAPABILITY write subscriptions
+  CAPABILITY read billing_history
+  CAPABILITY write billing_history
+  CAPABILITY read service_history
+  CAPABILITY write service_history
+  CAPABILITY read referrals
+  CAPABILITY write referrals
+  CAPABILITY read users
+  CAPABILITY write users
+  CAPABILITY read appointments
+  CAPABILITY write notifications
+  CAPABILITY call payment
+  CAPABILITY call email
+
+-- Subscriptions
+FLOW get_subscription get /subscription
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET sub
+    FETCH subscriptions
+      FILTER user_id EQ auth.user_id
+      FILTER status EQ active
+    OR 0 "ok"
+  RETURN 200
+    subscription sub
+
+FLOW create_checkout post /subscription/checkout
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY CheckoutRequest
+    plan ENUM plus REQUIRED
+    return_url STRING 500
+  LET checkout
+    CALL payment.create_checkout
+      user_id auth.user_id
+      plan body.plan
+      return_url body.return_url
+    OR 502 "payment service unavailable"
+  RETURN 200 checkout
+
+FLOW activate_subscription post /subscription/activate
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY ActivateRequest
+    payment_provider ENUM stripe apple google REQUIRED
+    provider_subscription_id STRING 255 REQUIRED
+  LET existing
+    FETCH subscriptions
+      FILTER user_id EQ auth.user_id
+      FILTER status EQ active
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE subscriptions
+        WHERE id EQ existing.id
+        SET plan plus
+        SET payment_provider body.payment_provider
+        SET provider_subscription_id body.provider_subscription_id
+        SET expires_at NOW_PLUS 30 days
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT subscriptions
+        user_id auth.user_id
+        plan plus
+        status active
+        payment_provider body.payment_provider
+        provider_subscription_id body.provider_subscription_id
+        expires_at NOW_PLUS 30 days
+      AS updated
+  LET billing_desc
+    T "commerce.subscription.plus_monthly"
+  INSERT billing_history
+    user_id auth.user_id
+    amount 500
+    currency USD
+    description billing_desc
+    status paid
+    payment_provider body.payment_provider
+    provider_transaction_id body.provider_subscription_id
+  AS billing
+  LET sub_user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 0 "ok"
+  INSERT notifications
+    user_id auth.user_id
+    type subscription_changed
+    title billing_desc
+  AS sub_notif
+  RETURN 200 updated
+
+FLOW cancel_subscription post /subscription/cancel
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET sub
+    FETCH subscriptions
+      FILTER user_id EQ auth.user_id
+      FILTER status EQ active
+    OR 404 "no active subscription"
+  UPDATE subscriptions
+    WHERE id EQ sub.id
+    SET status cancelled
+    SET cancelled_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW list_billing get /billing
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET history
+    QUERY billing_history
+      FILTER user_id EQ auth.user_id
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 history
+
+-- Service history
+FLOW list_service_history get /history
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM role MAYBE ENUM client provider
+  LET as_client
+    QUERY service_history
+      FILTER client_id EQ auth.user_id
+      SORT completed_at DESC
+      PAGE_SIZE 50
+  LET as_provider
+    QUERY service_history
+      FILTER provider_id EQ auth.user_id
+      SORT completed_at DESC
+      PAGE_SIZE 50
+  RETURN 200
+    as_client as_client
+    as_provider as_provider
+
+FLOW record_service post /history
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY RecordService
+    appointment_id UUID REQUIRED
+    services TEXT
+    hours_worked DECIMAL
+    rate DECIMAL
+    total_amount DECIMAL
+    currency ENUM EUR MDL USD
+  LET appointment
+    FETCH appointments
+      FILTER id EQ body.appointment_id
+    OR 404 "appointment not found"
+  GUARD is_completed 400 "appointment must be completed"
+    EQ appointment.status completed
+  GUARD is_participant 403 "not your appointment"
+    OR
+      EQ appointment.client_id auth.user_id
+      EQ appointment.provider_id auth.user_id
+  INSERT service_history
+    appointment_id body.appointment_id
+    client_id appointment.client_id
+    provider_id appointment.provider_id
+    services body.services
+    hours_worked body.hours_worked
+    rate body.rate
+    total_amount body.total_amount
+    currency body.currency
+    completed_at appointment.updated_at
+  AS record
+  RETURN 201 record
+
+-- Referrals
+FLOW get_referral_info get /referral
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404
+  LET referral_count
+    QUERY referrals
+      FILTER referrer_id EQ auth.user_id
+      FILTER status EQ completed
+      PAGE_SIZE 1000
+  RETURN 200
+    referral_code user.referral_code
+    total_referrals referral_count.total
+
+FLOW apply_referral post /referral/apply
+  REALM commerce_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 1 per_day per_user
+  BODY ApplyReferral
+    referral_code STRING 50 REQUIRED
+  LET referrer
+    FETCH users
+      FILTER referral_code EQ body.referral_code
+    OR 404 "invalid referral code"
+  GUARD not_self 400 "cannot use your own referral code"
+    NEQ referrer.id auth.user_id
+  INSERT referrals
+    referrer_id referrer.id
+    referred_id auth.user_id
+    referral_code body.referral_code
+    status completed
+    reward_type plus_week
+  AS referral
+  LET existing_sub
+    FETCH subscriptions
+      FILTER user_id EQ referrer.id
+      FILTER status EQ active
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing_sub null
+      UPDATE subscriptions
+        WHERE id EQ existing_sub.id
+        SET expires_at NOW_PLUS 7 days
+      AS reward_sub
+      OR 404
+    DEFAULT
+      INSERT subscriptions
+        user_id referrer.id
+        plan plus
+        status active
+        expires_at NOW_PLUS 7 days
+      AS reward_sub
+  UPDATE referrals
+    WHERE id EQ referral.id
+    SET status rewarded
+    SET rewarded_at NOW
+  AS rewarded
+  OR 404
+  LET reward_title
+    T "commerce.referral.reward_granted"
+  INSERT notifications
+    user_id referrer.id
+    type subscription_changed
+    title reward_title
+  AS reward_notif
+  RETURN 201 referral

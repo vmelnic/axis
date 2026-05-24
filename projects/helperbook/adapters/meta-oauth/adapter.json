@@ -1,0 +1,28 @@
+{
+  "name": "meta-oauth",
+  "version": "0.1.0",
+  "description": "Meta (Facebook) OAuth 2.0 social login",
+  "service": "meta_auth",
+  "methods": ["exchange_code", "get_profile"],
+  "provider": "meta",
+  "config": {
+    "app_id": { "env": "META_APP_ID", "required": true },
+    "app_secret": { "env": "META_APP_SECRET", "required": true, "secret": true },
+    "redirect_uri": { "env": "META_REDIRECT_URI", "required": true }
+  },
+  "endpoints": {
+    "exchange_code": {
+      "method": "GET",
+      "url": "https://graph.facebook.com/v19.0/oauth/access_token?client_id=${META_APP_ID}&client_secret=${META_APP_SECRET}&redirect_uri=${META_REDIRECT_URI}&code=${code}",
+      "input": { "code": "string" },
+      "output": { "access_token": "string", "token_type": "string", "expires_in": "int" }
+    },
+    "get_profile": {
+      "method": "GET",
+      "url": "https://graph.facebook.com/v19.0/me?fields=id,name,email,picture&access_token=${access_token}",
+      "input": { "access_token": "string" },
+      "output": { "id": "string", "email": "string", "name": "string", "picture": "string" }
+    }
+  },
+  "hot_swap": true
+}

@@ -1,0 +1,38 @@
+{
+  "email": {
+    "welcome": {
+      "greeting": "Добро пожаловать в Helperbook, {{name}}!",
+      "body": "Вы присоединились к сообществу профессионалов и клиентов. Начните искать услуги рядом с вами.",
+      "footer": "Вы получили это письмо, потому что зарегистрировались на helperbook.app"
+    },
+    "otp": {
+      "title": "Ваш код подтверждения",
+      "message": "Используйте код ниже для подтверждения:",
+      "expiry_note": "Этот код истечёт через {{minutes}} минут."
+    }
+  },
+  "push": {
+    "appointment_reminder": "Напоминание: {{service}} с {{provider}} в {{time}}",
+    "new_message": "Новое сообщение от {{sender}}",
+    "connection_request": "{{name}} хочет связаться с вами",
+    "review_received": "Получена новая оценка: {{rating}} звёзд",
+    "badge_approved": "Ваша верификация личности одобрена!",
+    "badge_rejected": "Ваша верификация личности не одобрена"
+  },
+  "sms": {
+    "otp": "Ваш код Helperbook: {{code}}. Действителен {{minutes}} мин."
+  },
+  "commerce": {
+    "subscription": {
+      "plus_monthly": "Helperbook Plus — Ежемесячно",
+      "cancelled": "Ваша подписка отменена",
+      "payment_failed": "Оплата подписки не прошла"
+    }
+  },
+  "common": {
+    "app_name": "Helperbook",
+    "greeting": "Привет, {{name}}",
+    "error": "Что-то пошло не так. Попробуйте снова.",
+    "message_deleted": "Это сообщение было удалено"
+  }
+}

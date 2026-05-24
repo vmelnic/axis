@@ -1,0 +1,22 @@
+-- File storage definitions
+
+STORAGE avatars
+  BACKEND local
+  BUCKET "uploads/avatars"
+  ACCESS public
+  MAX_SIZE 5242880
+  TYPES jpg png gif webp
+
+STORAGE chat_attachments
+  BACKEND local
+  BUCKET "uploads/chat"
+  ACCESS private
+  MAX_SIZE 10485760
+  TYPES jpg png gif webp pdf doc docx
+
+STORAGE badge_documents
+  BACKEND local
+  BUCKET "uploads/badges"
+  ACCESS private
+  MAX_SIZE 20971520
+  TYPES jpg png pdf

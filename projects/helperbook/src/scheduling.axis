@@ -1,0 +1,756 @@
+SHAPE ProviderProfile
+  user_id UUID PK REF User.id
+  profession STRING 200
+  experience_years INT
+  certifications TEXT
+  working_schedule TEXT
+  is_available BOOL DEFAULT true
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ProviderAvailability
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  day_of_week INT REQUIRED
+  start_time STRING 10 REQUIRED
+  end_time STRING 10 REQUIRED
+  is_active BOOL DEFAULT true
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ProviderStatus
+  user_id UUID PK REF User.id
+  status ENUM available busy not_available DEFAULT available
+  until_date TIMESTAMP
+  updated_at TIMESTAMP AUTO
+
+SHAPE ProviderOnboarding
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  step ENUM profile services availability documents verification complete DEFAULT profile
+  profile_complete BOOL DEFAULT false
+  services_added BOOL DEFAULT false
+  availability_set BOOL DEFAULT false
+  documents_uploaded BOOL DEFAULT false
+  verified BOOL DEFAULT false
+  completed_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Appointment
+  id UUID PK AUTO
+  client_id UUID REF User.id REQUIRED
+  provider_id UUID REF User.id REQUIRED
+  title STRING 200 REQUIRED
+  start_at TIMESTAMP REQUIRED
+  end_at TIMESTAMP REQUIRED
+  location STRING 500
+  services TEXT
+  status ENUM proposed confirmed in_progress completed dismissed cancelled no_show DEFAULT proposed
+  notes TEXT
+  proposed_by UUID REF User.id REQUIRED
+  dismiss_reason TEXT
+  cancel_reason TEXT
+  conversation_id UUID REF Conversation.id
+  completion_amount DECIMAL PRECISION 10 SCALE 2
+  completion_currency ENUM EUR MDL USD DEFAULT EUR
+  completion_hours DECIMAL PRECISION 6 SCALE 2
+  completion_confirmed_at TIMESTAMP
+  completion_auto_confirm_at TIMESTAMP
+  no_show_count INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE provider_profiles POSTGRES
+  SHAPE ProviderProfile
+  INDEX user_id
+
+SOURCE provider_availability POSTGRES
+  SHAPE ProviderAvailability
+  INDEX user_id
+  INDEX user_id day_of_week
+
+SOURCE provider_status POSTGRES
+  SHAPE ProviderStatus
+  INDEX user_id
+
+SOURCE provider_onboarding POSTGRES
+  SHAPE ProviderOnboarding
+  INDEX user_id UNIQUE
+  INDEX step
+
+SOURCE appointments POSTGRES
+  SHAPE Appointment
+  INDEX client_id
+  INDEX provider_id
+  INDEX status
+  INDEX start_at
+  INDEX client_id status
+  INDEX provider_id status
+  INDEX conversation_id
+
+SHAPE CalendarSync
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  provider ENUM google apple DEFAULT google
+  access_token STRING 500
+  refresh_token STRING 500
+  token_expires_at TIMESTAMP
+  sync_enabled BOOL DEFAULT true
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE AppointmentCalendarEvent
+  id UUID PK AUTO
+  appointment_id UUID REF Appointment.id REQUIRED
+  user_id UUID REF User.id REQUIRED
+  external_event_id STRING 255 REQUIRED
+  calendar_provider ENUM google apple DEFAULT google
+  created_at TIMESTAMP AUTO
+
+SOURCE calendar_syncs POSTGRES
+  SHAPE CalendarSync
+  INDEX user_id
+  INDEX user_id provider UNIQUE
+
+SOURCE appointment_calendar_events POSTGRES
+  SHAPE AppointmentCalendarEvent
+  INDEX appointment_id
+  INDEX user_id
+  INDEX external_event_id
+
+SERVICE calendar
+  ENDPOINT CALENDAR_SERVICE_URL
+  AUTH bearer VAULT GOOGLE_CLIENT_SECRET
+  METHOD create_event
+    INPUT access_token STRING 500
+    INPUT title STRING 200
+    INPUT start_at STRING 50
+    INPUT end_at STRING 50
+    INPUT location STRING 500
+    INPUT description TEXT
+    OUTPUT event_id STRING 255
+    OUTPUT html_link STRING 500
+    TIMEOUT 10s
+    RETRY 1 BACKOFF exponential
+  METHOD delete_event
+    INPUT access_token STRING 500
+    INPUT event_id STRING 255
+    OUTPUT success BOOL
+    TIMEOUT 5s
+  METHOD list_events
+    INPUT access_token STRING 500
+    INPUT time_min STRING 50
+    INPUT time_max STRING 50
+    OUTPUT events TEXT
+    OUTPUT total INT
+    TIMEOUT 10s
+
+REALM scheduling_realm
+  CAPABILITY read provider_profiles
+  CAPABILITY write provider_profiles
+  CAPABILITY read provider_availability
+  CAPABILITY write provider_availability
+  CAPABILITY read provider_status
+  CAPABILITY write provider_status
+  CAPABILITY read appointments
+  CAPABILITY write appointments
+  CAPABILITY read users
+  CAPABILITY write users
+  CAPABILITY read calendar_syncs
+  CAPABILITY write calendar_syncs
+  CAPABILITY read appointment_calendar_events
+  CAPABILITY write appointment_calendar_events
+  CAPABILITY write notifications
+  CAPABILITY call calendar
+  CAPABILITY call push
+  CAPABILITY call email
+  CAPABILITY read provider_onboarding
+  CAPABILITY write provider_onboarding
+
+-- Provider profile
+FLOW get_provider_profile get /provider/profile
+  REALM scheduling_realm
+  AUTH session
+  LET profile
+    FETCH provider_profiles
+      FILTER user_id EQ auth.user_id
+    OR 404 "provider profile not found"
+  RETURN 200 profile
+
+FLOW upsert_provider_profile put /provider/profile
+  REALM scheduling_realm
+  AUTH session
+  BODY ProviderProfileBody
+    profession STRING 200
+    experience_years INT
+    certifications TEXT
+    working_schedule TEXT
+  LET existing
+    FETCH provider_profiles
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE provider_profiles
+        WHERE user_id EQ auth.user_id
+        SET profession body.profession
+        SET experience_years body.experience_years
+        SET certifications body.certifications
+        SET working_schedule body.working_schedule
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT provider_profiles
+        user_id auth.user_id
+        profession body.profession
+        experience_years body.experience_years
+        certifications body.certifications
+        working_schedule body.working_schedule
+      AS updated
+  RETURN 200 updated
+
+-- Provider onboarding
+FLOW get_onboarding_status get /provider/onboarding
+  REALM scheduling_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET onboarding
+    FETCH provider_onboarding
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  RETURN 200
+    onboarding onboarding
+
+FLOW start_onboarding post /provider/onboarding
+  REALM scheduling_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET existing
+    FETCH provider_onboarding
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  GUARD not_started 400 "onboarding already started"
+    EQ existing null
+  INSERT provider_onboarding
+    user_id auth.user_id
+    step profile
+  AS onboarding
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET role provider
+    SET is_provider true
+  AS user_updated
+  OR 404
+  RETURN 201 onboarding
+
+FLOW advance_onboarding post /provider/onboarding/advance
+  REALM scheduling_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY AdvanceOnboarding
+    step ENUM profile services availability documents verification complete REQUIRED
+  LET onboarding
+    FETCH provider_onboarding
+      FILTER user_id EQ auth.user_id
+    OR 404 "onboarding not found"
+  MATCH
+    WHEN EQ body.step profile
+      UPDATE provider_onboarding
+        WHERE user_id EQ auth.user_id
+        SET profile_complete true
+        SET step services
+      AS updated
+      OR 404
+    WHEN EQ body.step services
+      UPDATE provider_onboarding
+        WHERE user_id EQ auth.user_id
+        SET services_added true
+        SET step availability
+      AS updated
+      OR 404
+    WHEN EQ body.step availability
+      UPDATE provider_onboarding
+        WHERE user_id EQ auth.user_id
+        SET availability_set true
+        SET step documents
+      AS updated
+      OR 404
+    WHEN EQ body.step documents
+      UPDATE provider_onboarding
+        WHERE user_id EQ auth.user_id
+        SET documents_uploaded true
+        SET step verification
+      AS updated
+      OR 404
+    DEFAULT
+      UPDATE provider_onboarding
+        WHERE user_id EQ auth.user_id
+        SET verified true
+        SET step complete
+        SET completed_at NOW
+      AS updated
+      OR 404
+  RETURN 200 updated
+
+-- Availability slots
+FLOW list_availability get /provider/availability
+  REALM scheduling_realm
+  AUTH session
+  LET slots
+    QUERY provider_availability
+      FILTER user_id EQ auth.user_id
+      SORT day_of_week ASC
+      PAGE_SIZE 50
+  RETURN 200 slots
+
+FLOW set_availability post /provider/availability
+  REALM scheduling_realm
+  AUTH session
+  LIMIT 50 per_minute per_user
+  BODY AvailabilitySlot
+    day_of_week INT REQUIRED
+    start_time STRING 10 REQUIRED
+    end_time STRING 10 REQUIRED
+    is_active BOOL
+  GUARD valid_day 400 "day_of_week must be 0-6"
+    LTE body.day_of_week 6
+  GUARD valid_day_min 400 "day_of_week must be 0-6"
+    GTE body.day_of_week 0
+  INSERT provider_availability
+    user_id auth.user_id
+    day_of_week body.day_of_week
+    start_time body.start_time
+    end_time body.end_time
+    is_active body.is_active
+  AS slot
+  RETURN 201 slot
+
+FLOW delete_availability delete /provider/availability/:id
+  REALM scheduling_realm
+  AUTH session
+  LET slot
+    FETCH provider_availability
+      FILTER id EQ path.id
+    OR 404 "slot not found"
+  GUARD ownership 403 "not your slot"
+    EQ slot.user_id auth.user_id
+  DELETE provider_availability
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- Provider status override
+FLOW set_status put /provider/status
+  REALM scheduling_realm
+  AUTH session
+  BODY StatusBody
+    status ENUM available busy not_available REQUIRED
+    until_date TIMESTAMP
+  LET existing
+    FETCH provider_status
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE provider_status
+        WHERE user_id EQ auth.user_id
+        SET status body.status
+        SET until_date body.until_date
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT provider_status
+        user_id auth.user_id
+        status body.status
+        until_date body.until_date
+      AS updated
+  RETURN 200 updated
+
+FLOW get_status get /provider/status
+  REALM scheduling_realm
+  AUTH session
+  LET status
+    FETCH provider_status
+      FILTER user_id EQ auth.user_id
+    OR 0 "ok"
+  RETURN 200
+    status status
+    available true
+
+-- Appointments
+FLOW propose_appointment post /appointments
+  REALM scheduling_realm
+  AUTH session
+  LIMIT 10 per_minute per_user
+  BODY ProposeAppointment
+    client_id UUID
+    provider_id UUID
+    title STRING 200 REQUIRED
+    start_at TIMESTAMP REQUIRED
+    end_at TIMESTAMP REQUIRED
+    location STRING 500
+    services TEXT
+    notes TEXT
+    conversation_id UUID
+  GUARD valid_time 400 "end must be after start"
+    GT body.end_at body.start_at
+  GUARD future 400 "appointment must be in the future"
+    GT body.start_at NOW
+  INSERT appointments
+    client_id body.client_id
+    provider_id body.provider_id
+    title body.title
+    start_at body.start_at
+    end_at body.end_at
+    location body.location
+    services body.services
+    notes body.notes
+    proposed_by auth.user_id
+    conversation_id body.conversation_id
+    status proposed
+  AS appointment
+  LET notify_title
+    T "push.appointment_reminder" service body.title provider auth.user_id time body.start_at
+  LET push_result
+    CALL push.send_notification
+      user_id body.provider_id
+      title notify_title
+      body body.notes
+      data appointment.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id body.provider_id
+    type appointment_proposed
+    title notify_title
+    body body.notes
+    data appointment.id
+  AS appt_notif
+  RETURN 201 appointment
+
+FLOW list_appointments get /appointments
+  REALM scheduling_realm
+  AUTH session
+  CACHE 30 VARY auth.user_id
+  PARAM status MAYBE ENUM proposed confirmed in_progress completed dismissed cancelled no_show
+  PARAM role MAYBE ENUM client provider
+  LET as_client
+    QUERY appointments
+      FILTER client_id EQ auth.user_id
+      FILTER status EQ query.status
+      SORT start_at DESC
+      PAGE_SIZE 50
+  LET as_provider
+    QUERY appointments
+      FILTER provider_id EQ auth.user_id
+      FILTER status EQ query.status
+      SORT start_at DESC
+      PAGE_SIZE 50
+  RETURN 200
+    as_client as_client
+    as_provider as_provider
+
+FLOW get_appointment get /appointments/:id
+  REALM scheduling_realm
+  AUTH session
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_participant 403 "not your appointment"
+    OR
+      EQ appointment.client_id auth.user_id
+      EQ appointment.provider_id auth.user_id
+  RETURN 200 appointment
+
+FLOW confirm_appointment post /appointments/:id/confirm
+  REALM scheduling_realm
+  AUTH session
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_pending 400 "appointment is not proposed"
+    EQ appointment.status proposed
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status confirmed
+  AS updated
+  OR 404
+  LET confirm_title
+    T "push.appointment_reminder" service appointment.title provider auth.user_id time appointment.start_at
+  LET push_result
+    CALL push.send_notification
+      user_id appointment.proposed_by
+      title confirm_title
+      body appointment.title
+      data appointment.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id appointment.proposed_by
+    type appointment_confirmed
+    title confirm_title
+    data appointment.id
+  AS confirm_notif
+  RETURN 200 updated
+
+FLOW dismiss_appointment post /appointments/:id/dismiss
+  REALM scheduling_realm
+  AUTH session
+  BODY DismissBody
+    reason TEXT REQUIRED
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_actionable 400 "appointment cannot be dismissed"
+    EQ appointment.status proposed
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status dismissed
+    SET dismiss_reason body.reason
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW cancel_appointment post /appointments/:id/cancel
+  REALM scheduling_realm
+  AUTH session
+  BODY CancelBody
+    reason TEXT REQUIRED
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_cancelable 400 "appointment cannot be cancelled"
+    EQ appointment.status confirmed
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status cancelled
+    SET cancel_reason body.reason
+  AS updated
+  OR 404
+  LET cancel_title
+    T "push.appointment_reminder" service appointment.title provider auth.user_id time appointment.start_at
+  LET cancel_push
+    CALL push.send_notification
+      user_id appointment.provider_id
+      title cancel_title
+      body body.reason
+      data appointment.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id appointment.provider_id
+    type appointment_cancelled
+    title cancel_title
+    body body.reason
+    data appointment.id
+  AS cancel_notif
+  RETURN 200 updated
+
+FLOW start_appointment post /appointments/:id/start
+  REALM scheduling_realm
+  AUTH session
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_confirmed 400 "appointment must be confirmed first"
+    EQ appointment.status confirmed
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status in_progress
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW complete_appointment post /appointments/:id/complete
+  REALM scheduling_realm
+  AUTH session
+  BODY CompleteBody
+    amount DECIMAL
+    currency ENUM EUR MDL USD
+    work_hours DECIMAL
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_in_progress 400 "appointment must be in progress"
+    EQ appointment.status in_progress
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status completed
+    SET completion_amount body.amount
+    SET completion_currency body.currency
+    SET completion_hours body.work_hours
+  AS updated
+  OR 404
+  LET complete_title
+    T "push.appointment_reminder" service appointment.title provider auth.user_id time appointment.start_at
+  LET complete_push
+    CALL push.send_notification
+      user_id appointment.client_id
+      title complete_title
+      body appointment.title
+      data appointment.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id appointment.client_id
+    type service_completed
+    title complete_title
+    data appointment.id
+  AS complete_notif
+  RETURN 200 updated
+
+FLOW mark_no_show post /appointments/:id/no-show
+  REALM scheduling_realm
+  AUTH session
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  GUARD is_confirmable 400 "appointment must be confirmed or in progress"
+    OR
+      EQ appointment.status confirmed
+      EQ appointment.status in_progress
+  UPDATE appointments
+    WHERE id EQ path.id
+    SET status no_show
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Calendar sync
+FLOW connect_calendar post /calendar/connect
+  REALM scheduling_realm
+  AUTH session
+  BODY ConnectCalendar
+    provider ENUM google apple REQUIRED
+    access_token STRING 500 REQUIRED
+    refresh_token STRING 500 REQUIRED
+    token_expires_at TIMESTAMP
+  LET existing
+    FETCH calendar_syncs
+      FILTER user_id EQ auth.user_id
+      FILTER provider EQ body.provider
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing null
+      UPDATE calendar_syncs
+        WHERE id EQ existing.id
+        SET access_token body.access_token
+        SET refresh_token body.refresh_token
+        SET token_expires_at body.token_expires_at
+        SET sync_enabled true
+      AS updated
+      OR 404
+    DEFAULT
+      INSERT calendar_syncs
+        user_id auth.user_id
+        provider body.provider
+        access_token body.access_token
+        refresh_token body.refresh_token
+        token_expires_at body.token_expires_at
+        sync_enabled true
+      AS updated
+  RETURN 200 updated
+
+FLOW disconnect_calendar delete /calendar/:provider
+  REALM scheduling_realm
+  AUTH session
+  DELETE calendar_syncs
+    WHERE user_id EQ auth.user_id
+    WHERE provider EQ path.provider
+  OR 404 "calendar not connected"
+  RETURN 204
+
+FLOW get_calendar_status get /calendar/status
+  REALM scheduling_realm
+  AUTH session
+  LET syncs
+    QUERY calendar_syncs
+      FILTER user_id EQ auth.user_id
+      PAGE_SIZE 10
+  RETURN 200 syncs
+
+FLOW sync_appointment_to_calendar post /appointments/:id/calendar
+  REALM scheduling_realm
+  AUTH session
+  LET appointment
+    FETCH appointments
+      FILTER id EQ path.id
+    OR 404 "appointment not found"
+  LET cal_sync
+    FETCH calendar_syncs
+      FILTER user_id EQ auth.user_id
+      FILTER sync_enabled EQ true
+    OR 400 "no calendar connected"
+  LET cal_event
+    CALL calendar.create_event
+      access_token cal_sync.access_token
+      title appointment.title
+      start_at appointment.start_at
+      end_at appointment.end_at
+      location appointment.location
+      description appointment.notes
+    OR 502 "calendar sync failed"
+  INSERT appointment_calendar_events
+    appointment_id path.id
+    user_id auth.user_id
+    external_event_id cal_event.event_id
+    calendar_provider cal_sync.provider
+  AS link
+  RETURN 201 link
+
+FLOW remove_from_calendar delete /appointments/:id/calendar
+  REALM scheduling_realm
+  AUTH session
+  LET link
+    FETCH appointment_calendar_events
+      FILTER appointment_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 404 "not synced to calendar"
+  LET cal_sync
+    FETCH calendar_syncs
+      FILTER user_id EQ auth.user_id
+      FILTER sync_enabled EQ true
+    OR 400 "no calendar connected"
+  LET result
+    CALL calendar.delete_event
+      access_token cal_sync.access_token
+      event_id link.external_event_id
+    OR 502 "calendar removal failed"
+  DELETE appointment_calendar_events
+    WHERE id EQ link.id
+  OR 404
+  RETURN 204
+
+FLOW get_public_availability get /providers/:user_id/availability
+  REALM scheduling_realm
+  AUTH session
+  LET slots
+    QUERY provider_availability
+      FILTER user_id EQ path.user_id
+      FILTER is_active EQ true
+      SORT day_of_week ASC
+      PAGE_SIZE 50
+  RETURN 200 slots
+
+FLOW get_public_status get /providers/:user_id/status
+  REALM scheduling_realm
+  AUTH session
+  LET status
+    FETCH provider_status
+      FILTER user_id EQ path.user_id
+    OR 0 "ok"
+  RETURN 200
+    status status
+
+-- Real-time appointment updates
+STREAM appointment_events ws /ws/appointments
+  REALM scheduling_realm
+  AUTH session
+
+STREAM appointment_sse sse /events/appointments
+  REALM scheduling_realm
+  AUTH session

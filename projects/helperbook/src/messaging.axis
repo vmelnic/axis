@@ -1,0 +1,648 @@
+SHAPE Conversation
+  id UUID PK AUTO
+  type ENUM direct group DEFAULT direct
+  name STRING 200
+  avatar_url STRING 500
+  created_by UUID REF User.id
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ConversationParticipant
+  id UUID PK AUTO
+  conversation_id UUID REF Conversation.id REQUIRED
+  user_id UUID REF User.id REQUIRED
+  role ENUM admin member DEFAULT member
+  last_read_at TIMESTAMP
+  archived_at TIMESTAMP
+  joined_at TIMESTAMP AUTO
+
+SHAPE Message
+  id UUID PK AUTO
+  conversation_id UUID REF Conversation.id REQUIRED
+  sender_id UUID REF User.id REQUIRED
+  type ENUM text photo video audio document location contact_share appointment_card service_card DEFAULT text
+  content TEXT REQUIRED
+  data TEXT
+  reply_to_id UUID REF Message.id
+  edited_at TIMESTAMP
+  deleted_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE ReplyTemplate
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  title STRING 100 REQUIRED
+  content TEXT REQUIRED
+  sort_order INT DEFAULT 0
+  created_at TIMESTAMP AUTO
+
+SHAPE MessageReadReceipt
+  id UUID PK AUTO
+  message_id UUID REF Message.id REQUIRED
+  user_id UUID REF User.id REQUIRED
+  read_at TIMESTAMP AUTO
+
+SOURCE conversations POSTGRES
+  SHAPE Conversation
+  INDEX type
+  INDEX created_by
+
+SOURCE conversation_participants POSTGRES
+  SHAPE ConversationParticipant
+  INDEX user_id
+  INDEX conversation_id
+  INDEX conversation_id user_id UNIQUE
+
+SOURCE messages POSTGRES
+  SHAPE Message
+  INDEX conversation_id created_at DESC
+  INDEX sender_id
+  INDEX conversation_id
+
+SOURCE reply_templates POSTGRES
+  SHAPE ReplyTemplate
+  INDEX user_id
+  INDEX user_id sort_order
+
+SOURCE message_read_receipts POSTGRES
+  SHAPE MessageReadReceipt
+  INDEX message_id
+  INDEX message_id user_id UNIQUE
+
+SERVICE openai
+  ENDPOINT OPENAI_SERVICE_URL
+  AUTH bearer VAULT OPENAI_API_KEY
+  METHOD moderate
+    INPUT text TEXT
+    OUTPUT flagged BOOL
+    OUTPUT categories TEXT
+    TIMEOUT 5s
+    RETRY 1 BACKOFF exponential
+  METHOD translate
+    INPUT text TEXT
+    INPUT target_lang STRING 10
+    OUTPUT translated TEXT
+    TIMEOUT 10s
+  METHOD summarize
+    INPUT text TEXT
+    INPUT max_sentences INT
+    OUTPUT summary TEXT
+    TIMEOUT 15s
+  METHOD suggest_replies
+    INPUT context TEXT
+    INPUT role STRING 20
+    OUTPUT suggestions TEXT
+    TIMEOUT 10s
+
+SERVICE search
+  ENDPOINT SEARCH_SERVICE_URL
+  AUTH bearer VAULT MEILISEARCH_API_KEY
+  METHOD search
+    INPUT index_name STRING 50
+    INPUT query STRING 500
+    INPUT filters TEXT
+    INPUT limit INT
+    OUTPUT hits TEXT
+    OUTPUT total INT
+    TIMEOUT 5s
+
+REALM messaging_realm
+  TENANT user_id
+  CAPABILITY read conversations
+  CAPABILITY write conversations
+  CAPABILITY read conversation_participants
+  CAPABILITY write conversation_participants
+  CAPABILITY read messages
+  CAPABILITY write messages
+  CAPABILITY read reply_templates
+  CAPABILITY write reply_templates
+  CAPABILITY read message_read_receipts
+  CAPABILITY write message_read_receipts
+  CAPABILITY write notifications
+  CAPABILITY call openai
+  CAPABILITY call search
+  CAPABILITY call push
+
+-- Direct conversations
+FLOW start_conversation post /conversations
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 20 per_minute per_user
+  BODY StartConversation
+    contact_id UUID REQUIRED
+  GUARD not_self 400 "cannot message yourself"
+    NEQ body.contact_id auth.user_id
+  INSERT conversations
+    type direct
+  AS conversation
+  INSERT conversation_participants
+    conversation_id conversation.id
+    user_id auth.user_id
+    role admin
+  AS p1
+  INSERT conversation_participants
+    conversation_id conversation.id
+    user_id body.contact_id
+    role member
+  AS p2
+  RETURN 201 conversation
+
+-- Group conversations
+FLOW create_group post /conversations/group
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 3 per_day per_user
+  BODY CreateGroup
+    name STRING 200 REQUIRED
+    avatar_url STRING 500
+    member_ids TEXT REQUIRED
+  INSERT conversations
+    type group
+    name body.name
+    avatar_url body.avatar_url
+    created_by auth.user_id
+  AS conversation
+  INSERT conversation_participants
+    conversation_id conversation.id
+    user_id auth.user_id
+    role admin
+  AS creator_participant
+  RETURN 201 conversation
+
+FLOW update_group put /conversations/:id/group
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateGroup
+    name STRING 200
+    avatar_url STRING 500
+  LET conversation
+    FETCH conversations
+      FILTER id EQ path.id
+    OR 404 "conversation not found"
+  GUARD is_group 400 "not a group conversation"
+    EQ conversation.type group
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  GUARD is_admin 403 "only admins can edit group"
+    EQ participant.role admin
+  UPDATE conversations
+    WHERE id EQ path.id
+    SET name body.name
+    SET avatar_url body.avatar_url
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW add_group_member post /conversations/:id/members
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY AddMember
+    user_id UUID REQUIRED
+  LET conversation
+    FETCH conversations
+      FILTER id EQ path.id
+    OR 404 "conversation not found"
+  GUARD is_group 400 "not a group conversation"
+    EQ conversation.type group
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  GUARD is_admin 403 "only admins can add members"
+    EQ participant.role admin
+  INSERT conversation_participants
+    conversation_id path.id
+    user_id body.user_id
+    role member
+  AS new_member
+  RETURN 201 new_member
+
+FLOW remove_group_member delete /conversations/:conv_id/members/:user_id
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET conversation
+    FETCH conversations
+      FILTER id EQ path.conv_id
+    OR 404 "conversation not found"
+  GUARD is_group 400 "not a group conversation"
+    EQ conversation.type group
+  LET my_role
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.conv_id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  GUARD is_admin 403 "only admins can remove members"
+    EQ my_role.role admin
+  DELETE conversation_participants
+    WHERE conversation_id EQ path.conv_id
+    WHERE user_id EQ path.user_id
+  OR 404
+  RETURN 204
+
+FLOW leave_group post /conversations/:id/leave
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET conversation
+    FETCH conversations
+      FILTER id EQ path.id
+    OR 404 "conversation not found"
+  GUARD is_group 400 "not a group conversation"
+    EQ conversation.type group
+  DELETE conversation_participants
+    WHERE conversation_id EQ path.id
+    WHERE user_id EQ auth.user_id
+  OR 404
+  RETURN 204
+
+-- List conversations
+FLOW list_conversations get /conversations
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  CACHE 10 VARY auth.user_id
+  PARAM archived MAYBE BOOL
+  LET participations
+    QUERY conversation_participants
+      FILTER user_id EQ auth.user_id
+      SORT joined_at DESC
+      PAGE_SIZE 50
+  RETURN 200 participations
+
+-- Messages
+FLOW send_message post /conversations/:id/messages
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 30 per_minute per_user
+  BODY SendMessage
+    type ENUM text photo video audio document location contact_share appointment_card service_card
+    content TEXT REQUIRED
+    data TEXT
+    reply_to_id UUID
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET moderation
+    CALL openai.moderate
+      text body.content
+    OR 0 "ok"
+  INSERT messages
+    conversation_id path.id
+    sender_id auth.user_id
+    type body.type
+    content body.content
+    data body.data
+    reply_to_id body.reply_to_id
+  AS message
+  LET push_title
+    T "push.new_message" sender auth.user_id
+  LET push_preview
+    RENDER "push/new_message.txt" sender_name auth.user_id preview body.content
+  LET push_result
+    CALL push.send_notification
+      user_id participant.user_id
+      title push_title
+      body push_preview
+      data message.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id participant.user_id
+    type message_received
+    title push_title
+    body push_preview
+    data message.id
+  AS msg_notif
+  RETURN 201 message
+
+FLOW list_messages get /conversations/:id/messages
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  CACHE 5 VARY auth.user_id
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET msgs
+    QUERY messages
+      FILTER conversation_id EQ path.id
+      FILTER deleted_at EQ null
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 msgs
+
+FLOW edit_message put /messages/:id
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY EditMessage
+    content TEXT REQUIRED
+  LET message
+    FETCH messages
+      FILTER id EQ path.id
+    OR 404 "message not found"
+  GUARD is_sender 403 "not your message"
+    EQ message.sender_id auth.user_id
+  GUARD within_48h 400 "edit window expired"
+    GT message.created_at NOW_MINUS 48 hours
+  UPDATE messages
+    WHERE id EQ path.id
+    SET content body.content
+    SET edited_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW delete_message delete /messages/:id
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET message
+    FETCH messages
+      FILTER id EQ path.id
+    OR 404 "message not found"
+  GUARD is_sender 403 "not your message"
+    EQ message.sender_id auth.user_id
+  GUARD within_48h 400 "delete window expired"
+    GT message.created_at NOW_MINUS 48 hours
+  LET deleted_text
+    T "common.message_deleted"
+  UPDATE messages
+    WHERE id EQ path.id
+    SET deleted_at NOW
+    SET content deleted_text
+  AS deleted
+  OR 404
+  RETURN 200 deleted
+
+-- File attachments
+FLOW upload_attachment post /conversations/:id/attachment
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 30 per_day per_user
+  BODY AttachmentUpload
+    file TEXT REQUIRED
+    type ENUM photo video audio document REQUIRED
+    caption TEXT
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  UPLOAD body.file -> chat_attachments AS file_url
+  INSERT messages
+    conversation_id path.id
+    sender_id auth.user_id
+    type body.type
+    content file_url
+    data body.caption
+  AS message
+  LET push_title
+    T "push.new_attachment" sender auth.user_id
+  LET push_result
+    CALL push.send_notification
+      user_id participant.user_id
+      title push_title
+      body push_title
+      data message.id
+    OR 0 "ok"
+  INSERT notifications
+    user_id participant.user_id
+    type message_received
+    title push_title
+    data message.id
+  AS attach_notif
+  RETURN 201 message
+
+-- Read receipts
+FLOW mark_read post /conversations/:id/read
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  UPDATE conversation_participants
+    WHERE conversation_id EQ path.id
+    SET last_read_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Archive / unarchive
+FLOW archive_conversation post /conversations/:id/archive
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  UPDATE conversation_participants
+    WHERE conversation_id EQ path.id
+    SET archived_at NOW
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW unarchive_conversation post /conversations/:id/unarchive
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member"
+  UPDATE conversation_participants
+    WHERE conversation_id EQ path.id
+    SET archived_at null
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Reply templates (provider)
+FLOW list_templates get /templates
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET templates
+    QUERY reply_templates
+      FILTER user_id EQ auth.user_id
+      SORT sort_order ASC
+      PAGE_SIZE 50
+  RETURN 200 templates
+
+FLOW create_template post /templates
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 50 per_day per_user
+  BODY CreateTemplate
+    title STRING 100 REQUIRED
+    content TEXT REQUIRED
+    sort_order INT
+  INSERT reply_templates
+    user_id auth.user_id
+    title body.title
+    content body.content
+    sort_order body.sort_order
+  AS template
+  RETURN 201 template
+
+FLOW update_template put /templates/:id
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  BODY UpdateTemplate
+    title STRING 100
+    content TEXT
+    sort_order INT
+  LET template
+    FETCH reply_templates
+      FILTER id EQ path.id
+    OR 404 "template not found"
+  GUARD ownership 403 "not your template"
+    EQ template.user_id auth.user_id
+  UPDATE reply_templates
+    WHERE id EQ path.id
+    SET title body.title
+    SET content body.content
+    SET sort_order body.sort_order
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW delete_template delete /templates/:id
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LET template
+    FETCH reply_templates
+      FILTER id EQ path.id
+    OR 404 "template not found"
+  GUARD ownership 403 "not your template"
+    EQ template.user_id auth.user_id
+  DELETE reply_templates
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- AI: translate message
+FLOW translate_message post /messages/:id/translate
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 30 per_minute per_user
+  BODY TranslateRequest
+    target_lang STRING 10 REQUIRED
+  LET message
+    FETCH messages
+      FILTER id EQ path.id
+    OR 404 "message not found"
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ message.conversation_id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET translation
+    CALL openai.translate
+      text message.content
+      target_lang body.target_lang
+    OR 502 "translation service unavailable"
+  RETURN 200 translation
+
+-- AI: suggest replies for provider
+FLOW suggest_replies post /conversations/:id/suggest
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 10 per_minute per_user
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET recent
+    QUERY messages
+      FILTER conversation_id EQ path.id
+      FILTER deleted_at EQ null
+      SORT created_at DESC
+      PAGE_SIZE 10
+  LET suggestions
+    CALL openai.suggest_replies
+      context recent
+      role "provider"
+    OR 502 "suggestion service unavailable"
+  RETURN 200 suggestions
+
+-- AI: summarize conversation
+FLOW summarize_conversation post /conversations/:id/summarize
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  LIMIT 5 per_minute per_user
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET all_messages
+    QUERY messages
+      FILTER conversation_id EQ path.id
+      FILTER deleted_at EQ null
+      SORT created_at ASC
+      PAGE_SIZE 200
+  LET summary
+    CALL openai.summarize
+      text all_messages
+      max_sentences 5
+    OR 502 "summarization service unavailable"
+  RETURN 200 summary
+
+-- Search messages
+FLOW search_messages get /conversations/:id/search
+  REALM messaging_realm
+  AUTH session
+  SCOPE TENANT auth.user_id
+  PARAM q STRING 500 REQUIRED
+  LET participant
+    FETCH conversation_participants
+      FILTER conversation_id EQ path.id
+      FILTER user_id EQ auth.user_id
+    OR 403 "not a member of this conversation"
+  LET results
+    CALL search.search
+      index_name "messages"
+      query query.q
+      filters path.id
+      limit 20
+    OR 502 "search service unavailable"
+  RETURN 200 results
+
+-- Real-time messaging
+STREAM chat_events ws /ws/chat
+  REALM messaging_realm
+  AUTH session
+
+STREAM chat_sse sse /events/chat
+  REALM messaging_realm
+  AUTH session

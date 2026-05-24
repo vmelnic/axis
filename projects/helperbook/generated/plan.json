@@ -1,0 +1,2692 @@
+-- SQL DDL
+CREATE TABLE IF NOT EXISTS app_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  version VARCHAR(20) NOT NULL,
+  platform VARCHAR(50) CHECK (platform IN ('ios', 'android', 'web')) NOT NULL,
+  min_supported VARCHAR(20) NOT NULL,
+  recommended VARCHAR(20) NOT NULL,
+  force_update BOOLEAN DEFAULT FALSE,
+  release_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_versions_platform ON app_versions (platform);
+CREATE INDEX IF NOT EXISTS idx_app_versions_version ON app_versions (version);
+
+CREATE TABLE IF NOT EXISTS deep_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug VARCHAR(100) NOT NULL UNIQUE,
+  type VARCHAR(50) CHECK (type IN ('profile', 'invite', 'chat', 'referral')) NOT NULL,
+  target_id UUID,
+  metadata TEXT,
+  clicks INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deep_links_slug ON deep_links (slug);
+CREATE INDEX IF NOT EXISTS idx_deep_links_type ON deep_links (type);
+
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone VARCHAR(20) NOT NULL UNIQUE,
+  phone_verified BOOLEAN DEFAULT FALSE,
+  name VARCHAR(100),
+  avatar_url VARCHAR(500),
+  bio TEXT,
+  location_lat NUMERIC(10,7),
+  location_lng NUMERIC(10,7),
+  location_name VARCHAR(255),
+  role VARCHAR(50) CHECK (role IN ('client', 'provider', 'both')) DEFAULT 'client',
+  slug VARCHAR(30) UNIQUE,
+  is_provider BOOLEAN DEFAULT FALSE,
+  is_admin BOOLEAN DEFAULT FALSE,
+  status VARCHAR(50) CHECK (status IN ('active', 'suspended', 'deleted')) DEFAULT 'active',
+  account_status VARCHAR(50) CHECK (account_status IN ('active', 'warned', 'suspended', 'banned')) DEFAULT 'active',
+  badge_type VARCHAR(50) CHECK (badge_type IN ('id_check', 'verified')),
+  badge_status VARCHAR(50) CHECK (badge_status IN ('pending', 'approved', 'rejected')),
+  badge_requested_at TIMESTAMPTZ,
+  badge_approved_at TIMESTAMPTZ,
+  email VARCHAR(255) UNIQUE,
+  email_verified BOOLEAN DEFAULT FALSE,
+  totp_secret VARCHAR(255),
+  totp_enabled BOOLEAN DEFAULT FALSE,
+  referral_code VARCHAR(50) UNIQUE,
+  last_seen TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users (phone);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_slug ON users (slug);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users (email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+CREATE INDEX IF NOT EXISTS idx_users_status ON users (status);
+CREATE INDEX IF NOT EXISTS idx_users_account_status ON users (account_status);
+CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users (referral_code);
+
+CREATE TABLE IF NOT EXISTS otp_codes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  phone VARCHAR(20),
+  email VARCHAR(255),
+  code VARCHAR(10) NOT NULL,
+  purpose VARCHAR(50) CHECK (purpose IN ('login', 'verify_phone', 'verify_email', 'recovery')) DEFAULT 'login',
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_otp_codes_phone_code_purpose ON otp_codes (phone, code, purpose);
+CREATE INDEX IF NOT EXISTS idx_otp_codes_email_code_purpose ON otp_codes (email, code, purpose);
+
+CREATE TABLE IF NOT EXISTS service_categories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(100) NOT NULL UNIQUE,
+  icon VARCHAR(50),
+  parent_id UUID REFERENCES service_categories(id),
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_service_categories_slug ON service_categories (slug);
+CREATE INDEX IF NOT EXISTS idx_service_categories_parent_id ON service_categories (parent_id);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_id UUID NOT NULL REFERENCES users(id),
+  action VARCHAR(100) NOT NULL,
+  entity_type VARCHAR(50) NOT NULL,
+  entity_id UUID,
+  details TEXT,
+  ip_address VARCHAR(45),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_admin_id ON audit_logs (admin_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity_type_entity_id ON audit_logs (entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  device_info TEXT,
+  ip_address VARCHAR(45),
+  last_active_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at);
+
+CREATE TABLE IF NOT EXISTS social_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  provider VARCHAR(50) CHECK (provider IN ('google', 'apple', 'linkedin', 'meta')) NOT NULL,
+  provider_user_id VARCHAR(255) NOT NULL,
+  email VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_social_accounts_user_id ON social_accounts (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_social_accounts_provider_provider_user_id ON social_accounts (provider, provider_user_id);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  plan VARCHAR(50) CHECK (plan IN ('free', 'plus')) DEFAULT 'free',
+  status VARCHAR(50) CHECK (status IN ('active', 'cancelled', 'expired')) DEFAULT 'active',
+  payment_provider VARCHAR(50) CHECK (payment_provider IN ('stripe', 'apple', 'google')),
+  provider_subscription_id VARCHAR(255),
+  started_at TIMESTAMPTZ DEFAULT now(),
+  expires_at TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions (status);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_expires_at ON subscriptions (expires_at);
+
+CREATE TABLE IF NOT EXISTS billing_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  amount INTEGER NOT NULL,
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'usd',
+  description VARCHAR(500) NOT NULL,
+  status VARCHAR(50) CHECK (status IN ('paid', 'refunded')) DEFAULT 'paid',
+  payment_provider VARCHAR(50) CHECK (payment_provider IN ('stripe', 'apple', 'google')),
+  provider_transaction_id VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_history_user_id ON billing_history (user_id);
+CREATE INDEX IF NOT EXISTS idx_billing_history_created_at ON billing_history (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS referrals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  referrer_id UUID NOT NULL REFERENCES users(id),
+  referred_id UUID NOT NULL REFERENCES users(id),
+  referral_code VARCHAR(50) NOT NULL,
+  status VARCHAR(50) CHECK (status IN ('pending', 'completed', 'rewarded')) DEFAULT 'pending',
+  reward_type VARCHAR(50) CHECK (reward_type IN ('plus_week')),
+  rewarded_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_referrals_referrer_id ON referrals (referrer_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_referred_id ON referrals (referred_id);
+CREATE INDEX IF NOT EXISTS idx_referrals_referral_code ON referrals (referral_code);
+
+CREATE TABLE IF NOT EXISTS payout_methods (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  type VARCHAR(50) CHECK (type IN ('bank_transfer', 'paypal', 'stripe_connect')) DEFAULT 'bank_transfer',
+  details TEXT NOT NULL,
+  is_default BOOLEAN DEFAULT FALSE,
+  verified BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payout_methods_user_id ON payout_methods (user_id);
+CREATE INDEX IF NOT EXISTS idx_payout_methods_user_id_is_default ON payout_methods (user_id, is_default);
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  type VARCHAR(50) CHECK (type IN ('direct', 'group')) DEFAULT 'direct',
+  name VARCHAR(200),
+  avatar_url VARCHAR(500),
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_type ON conversations (type);
+CREATE INDEX IF NOT EXISTS idx_conversations_created_by ON conversations (created_by);
+
+CREATE TABLE IF NOT EXISTS reply_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  title VARCHAR(100) NOT NULL,
+  content TEXT NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reply_templates_user_id ON reply_templates (user_id);
+CREATE INDEX IF NOT EXISTS idx_reply_templates_user_id_sort_order ON reply_templates (user_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS connections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  contact_id UUID NOT NULL REFERENCES users(id),
+  status VARCHAR(50) CHECK (status IN ('pending', 'accepted', 'rejected', 'blocked')) DEFAULT 'pending',
+  message TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_connections_user_id ON connections (user_id);
+CREATE INDEX IF NOT EXISTS idx_connections_contact_id ON connections (contact_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connections_user_id_contact_id ON connections (user_id, contact_id);
+CREATE INDEX IF NOT EXISTS idx_connections_status ON connections (status);
+
+CREATE TABLE IF NOT EXISTS contact_favorites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  contact_id UUID NOT NULL REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_favorites_user_id ON contact_favorites (user_id);
+
+CREATE TABLE IF NOT EXISTS contact_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  contact_id UUID NOT NULL REFERENCES users(id),
+  note TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_notes_user_id ON contact_notes (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contact_notes_user_id_contact_id ON contact_notes (user_id, contact_id);
+
+CREATE TABLE IF NOT EXISTS contact_folders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  name VARCHAR(100) NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_folders_user_id ON contact_folders (user_id);
+
+CREATE TABLE IF NOT EXISTS badges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  badge_type VARCHAR(50) CHECK (badge_type IN ('id_check', 'verified')) NOT NULL,
+  status VARCHAR(50) CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
+  selfie_url VARCHAR(500),
+  id_front_url VARCHAR(500),
+  id_back_url VARCHAR(500),
+  match_score NUMERIC(5,2),
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_badges_user_id ON badges (user_id);
+CREATE INDEX IF NOT EXISTS idx_badges_status ON badges (status);
+CREATE INDEX IF NOT EXISTS idx_badges_badge_type_status ON badges (badge_type, status);
+
+CREATE TABLE IF NOT EXISTS user_reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reporter_id UUID NOT NULL REFERENCES users(id),
+  reported_id UUID NOT NULL REFERENCES users(id),
+  reason VARCHAR(50) CHECK (reason IN ('inappropriate', 'fake', 'harassment', 'no_show', 'scam', 'spam', 'other')) NOT NULL,
+  description TEXT,
+  evidence TEXT,
+  status VARCHAR(50) CHECK (status IN ('pending', 'reviewed', 'resolved', 'dismissed')) DEFAULT 'pending',
+  reviewed_by UUID REFERENCES users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_reports_reported_id ON user_reports (reported_id);
+CREATE INDEX IF NOT EXISTS idx_user_reports_reporter_id ON user_reports (reporter_id);
+CREATE INDEX IF NOT EXISTS idx_user_reports_status ON user_reports (status);
+
+CREATE TABLE IF NOT EXISTS provider_profiles (
+  user_id UUID PRIMARY KEY REFERENCES users(id),
+  profession VARCHAR(200),
+  experience_years INTEGER,
+  certifications TEXT,
+  working_schedule TEXT,
+  is_available BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_profiles_user_id ON provider_profiles (user_id);
+
+CREATE TABLE IF NOT EXISTS provider_availability (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  day_of_week INTEGER NOT NULL,
+  start_time VARCHAR(10) NOT NULL,
+  end_time VARCHAR(10) NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_availability_user_id ON provider_availability (user_id);
+CREATE INDEX IF NOT EXISTS idx_provider_availability_user_id_day_of_week ON provider_availability (user_id, day_of_week);
+
+CREATE TABLE IF NOT EXISTS provider_status (
+  user_id UUID PRIMARY KEY REFERENCES users(id),
+  status VARCHAR(50) CHECK (status IN ('available', 'busy', 'not_available')) DEFAULT 'available',
+  until_date TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_status_user_id ON provider_status (user_id);
+
+CREATE TABLE IF NOT EXISTS provider_onboarding (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  step VARCHAR(50) CHECK (step IN ('profile', 'services', 'availability', 'documents', 'verification', 'complete')) DEFAULT 'profile',
+  profile_complete BOOLEAN DEFAULT FALSE,
+  services_added BOOLEAN DEFAULT FALSE,
+  availability_set BOOLEAN DEFAULT FALSE,
+  documents_uploaded BOOLEAN DEFAULT FALSE,
+  verified BOOLEAN DEFAULT FALSE,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_onboarding_user_id ON provider_onboarding (user_id);
+CREATE INDEX IF NOT EXISTS idx_provider_onboarding_step ON provider_onboarding (step);
+
+CREATE TABLE IF NOT EXISTS calendar_syncs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  provider VARCHAR(50) CHECK (provider IN ('google', 'apple')) DEFAULT 'google',
+  access_token VARCHAR(500),
+  refresh_token VARCHAR(500),
+  token_expires_at TIMESTAMPTZ,
+  sync_enabled BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_calendar_syncs_user_id ON calendar_syncs (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_syncs_user_id_provider ON calendar_syncs (user_id, provider);
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id UUID PRIMARY KEY REFERENCES users(id),
+  notification_messages BOOLEAN DEFAULT TRUE,
+  notification_connections BOOLEAN DEFAULT TRUE,
+  notification_appointments BOOLEAN DEFAULT TRUE,
+  notification_reviews BOOLEAN DEFAULT TRUE,
+  notification_network BOOLEAN DEFAULT FALSE,
+  notification_marketing BOOLEAN DEFAULT FALSE,
+  privacy_profile_visible BOOLEAN DEFAULT TRUE,
+  privacy_show_phone BOOLEAN DEFAULT FALSE,
+  privacy_show_location BOOLEAN DEFAULT TRUE,
+  privacy_last_seen VARCHAR(50) CHECK (privacy_last_seen IN ('everyone', 'contacts', 'nobody')) DEFAULT 'everyone',
+  privacy_read_receipts BOOLEAN DEFAULT TRUE,
+  privacy_online_status BOOLEAN DEFAULT TRUE,
+  language VARCHAR(50) CHECK (language IN ('en', 'ro', 'ru')) DEFAULT 'en',
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  theme VARCHAR(50) CHECK (theme IN ('light', 'dark', 'system')) DEFAULT 'system',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_settings_user_id ON user_settings (user_id);
+
+CREATE TABLE IF NOT EXISTS blocked_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  blocker_id UUID NOT NULL REFERENCES users(id),
+  blocked_id UUID NOT NULL REFERENCES users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocked_users_blocker_id ON blocked_users (blocker_id);
+CREATE INDEX IF NOT EXISTS idx_blocked_users_blocked_id ON blocked_users (blocked_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_blocked_users_blocker_id_blocked_id ON blocked_users (blocker_id, blocked_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  type VARCHAR(50) CHECK (type IN ('message_received', 'appointment_proposed', 'appointment_confirmed', 'appointment_cancelled', 'appointment_reminder', 'connection_request', 'connection_accepted', 'review_received', 'contact_joined', 'service_completed', 'dispute_opened', 'welcome', 'badge_reviewed', 'subscription_changed')) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  body TEXT,
+  data TEXT,
+  read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications (user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id_read ON notifications (user_id, read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at DESC);
+
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  platform VARCHAR(50) CHECK (platform IN ('ios', 'android', 'web')) NOT NULL,
+  token VARCHAR(500) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_device_tokens_user_id ON device_tokens (user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_tokens_user_id_token ON device_tokens (user_id, token);
+
+CREATE TABLE IF NOT EXISTS gallery_images (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  url VARCHAR(500) NOT NULL,
+  caption VARCHAR(500),
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gallery_images_user_id ON gallery_images (user_id);
+CREATE INDEX IF NOT EXISTS idx_gallery_images_user_id_sort_order ON gallery_images (user_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS commission_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(100) NOT NULL,
+  rate NUMERIC(5,4) NOT NULL,
+  min_amount NUMERIC(10,2),
+  max_amount NUMERIC(10,2),
+  category_id UUID REFERENCES service_categories(id),
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_commission_rules_is_active ON commission_rules (is_active);
+CREATE INDEX IF NOT EXISTS idx_commission_rules_category_id ON commission_rules (category_id);
+
+CREATE TABLE IF NOT EXISTS user_services (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id),
+  category_id UUID NOT NULL REFERENCES service_categories(id),
+  service_name VARCHAR(200),
+  rate_type VARCHAR(50) CHECK (rate_type IN ('hourly', 'fixed', 'negotiable')) DEFAULT 'negotiable',
+  rate_amount NUMERIC(10,2),
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  price_min NUMERIC(10,2),
+  price_max NUMERIC(10,2),
+  description TEXT,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_services_user_id ON user_services (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_services_category_id ON user_services (category_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_services_user_id_category_id ON user_services (user_id, category_id);
+
+CREATE TABLE IF NOT EXISTS payouts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id UUID NOT NULL REFERENCES users(id),
+  payout_method_id UUID NOT NULL REFERENCES payout_methods(id),
+  amount NUMERIC(10,2) NOT NULL,
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  status VARCHAR(50) CHECK (status IN ('requested', 'processing', 'completed', 'failed')) DEFAULT 'requested',
+  reference VARCHAR(255),
+  failure_reason TEXT,
+  requested_at TIMESTAMPTZ DEFAULT now(),
+  processed_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_payouts_provider_id ON payouts (provider_id);
+CREATE INDEX IF NOT EXISTS idx_payouts_status ON payouts (status);
+CREATE INDEX IF NOT EXISTS idx_payouts_provider_id_status ON payouts (provider_id, status);
+CREATE INDEX IF NOT EXISTS idx_payouts_requested_at ON payouts (requested_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_participants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  role VARCHAR(50) CHECK (role IN ('admin', 'member')) DEFAULT 'member',
+  last_read_at TIMESTAMPTZ,
+  archived_at TIMESTAMPTZ,
+  joined_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_user_id ON conversation_participants (user_id);
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_conversation_id ON conversation_participants (conversation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_participants_conversation_id_user_id ON conversation_participants (conversation_id, user_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES conversations(id),
+  sender_id UUID NOT NULL REFERENCES users(id),
+  type VARCHAR(50) CHECK (type IN ('text', 'photo', 'video', 'audio', 'document', 'location', 'contact_share', 'appointment_card', 'service_card')) DEFAULT 'text',
+  content TEXT NOT NULL,
+  data TEXT,
+  reply_to_id UUID REFERENCES messages(id),
+  edited_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_created_at ON messages (conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages (sender_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL REFERENCES users(id),
+  provider_id UUID NOT NULL REFERENCES users(id),
+  title VARCHAR(200) NOT NULL,
+  start_at TIMESTAMPTZ NOT NULL,
+  end_at TIMESTAMPTZ NOT NULL,
+  location VARCHAR(500),
+  services TEXT,
+  status VARCHAR(50) CHECK (status IN ('proposed', 'confirmed', 'in_progress', 'completed', 'dismissed', 'cancelled', 'no_show')) DEFAULT 'proposed',
+  notes TEXT,
+  proposed_by UUID NOT NULL REFERENCES users(id),
+  dismiss_reason TEXT,
+  cancel_reason TEXT,
+  conversation_id UUID REFERENCES conversations(id),
+  completion_amount NUMERIC(10,2),
+  completion_currency VARCHAR(50) CHECK (completion_currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  completion_hours NUMERIC(6,2),
+  completion_confirmed_at TIMESTAMPTZ,
+  completion_auto_confirm_at TIMESTAMPTZ,
+  no_show_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_client_id ON appointments (client_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_provider_id ON appointments (provider_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments (status);
+CREATE INDEX IF NOT EXISTS idx_appointments_start_at ON appointments (start_at);
+CREATE INDEX IF NOT EXISTS idx_appointments_client_id_status ON appointments (client_id, status);
+CREATE INDEX IF NOT EXISTS idx_appointments_provider_id_status ON appointments (provider_id, status);
+CREATE INDEX IF NOT EXISTS idx_appointments_conversation_id ON appointments (conversation_id);
+
+CREATE TABLE IF NOT EXISTS contact_folder_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  folder_id UUID NOT NULL REFERENCES contact_folders(id),
+  contact_id UUID NOT NULL REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_contact_folder_members_folder_id ON contact_folder_members (folder_id);
+
+CREATE TABLE IF NOT EXISTS message_read_receipts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  message_id UUID NOT NULL REFERENCES messages(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  read_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_read_receipts_message_id ON message_read_receipts (message_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_read_receipts_message_id_user_id ON message_read_receipts (message_id, user_id);
+
+CREATE TABLE IF NOT EXISTS service_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id UUID NOT NULL REFERENCES appointments(id),
+  client_id UUID NOT NULL REFERENCES users(id),
+  provider_id UUID NOT NULL REFERENCES users(id),
+  services TEXT,
+  hours_worked NUMERIC(6,2),
+  rate NUMERIC(10,2),
+  total_amount NUMERIC(10,2),
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  status VARCHAR(50) CHECK (status IN ('confirmed', 'disputed')) DEFAULT 'confirmed',
+  completed_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_history_client_id ON service_history (client_id);
+CREATE INDEX IF NOT EXISTS idx_service_history_provider_id ON service_history (provider_id);
+CREATE INDEX IF NOT EXISTS idx_service_history_appointment_id ON service_history (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_service_history_completed_at ON service_history (completed_at DESC);
+
+CREATE TABLE IF NOT EXISTS reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id UUID NOT NULL REFERENCES appointments(id),
+  reviewer_id UUID NOT NULL REFERENCES users(id),
+  reviewee_id UUID NOT NULL REFERENCES users(id),
+  rating INTEGER NOT NULL,
+  content TEXT,
+  tags TEXT,
+  photos TEXT,
+  response TEXT,
+  response_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewee_id ON reviews (reviewee_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewer_id ON reviews (reviewer_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_appointment_id_reviewer_id ON reviews (appointment_id, reviewer_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewee_id_rating ON reviews (reviewee_id, rating);
+
+CREATE TABLE IF NOT EXISTS disputes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id UUID NOT NULL REFERENCES appointments(id),
+  opened_by UUID NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL,
+  proposed_amount NUMERIC(10,2),
+  counter_amount NUMERIC(10,2),
+  status VARCHAR(50) CHECK (status IN ('open', 'resolved', 'expired')) DEFAULT 'open',
+  resolution TEXT,
+  resolved_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_disputes_appointment_id ON disputes (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_disputes_opened_by ON disputes (opened_by);
+CREATE INDEX IF NOT EXISTS idx_disputes_status ON disputes (status);
+
+CREATE TABLE IF NOT EXISTS appointment_calendar_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  appointment_id UUID NOT NULL REFERENCES appointments(id),
+  user_id UUID NOT NULL REFERENCES users(id),
+  external_event_id VARCHAR(255) NOT NULL,
+  calendar_provider VARCHAR(50) CHECK (calendar_provider IN ('google', 'apple')) DEFAULT 'google',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_appointment_calendar_events_appointment_id ON appointment_calendar_events (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_calendar_events_user_id ON appointment_calendar_events (user_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_calendar_events_external_event_id ON appointment_calendar_events (external_event_id);
+
+CREATE TABLE IF NOT EXISTS provider_earnings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider_id UUID NOT NULL REFERENCES users(id),
+  appointment_id UUID NOT NULL REFERENCES appointments(id),
+  service_history_id UUID NOT NULL REFERENCES service_history(id),
+  gross_amount NUMERIC(10,2) NOT NULL,
+  commission_rate NUMERIC(5,4) DEFAULT 0.10,
+  commission_amount NUMERIC(10,2) NOT NULL,
+  net_amount NUMERIC(10,2) NOT NULL,
+  currency VARCHAR(50) CHECK (currency IN ('eur', 'mdl', 'usd')) DEFAULT 'eur',
+  status VARCHAR(50) CHECK (status IN ('pending', 'available', 'paid_out')) DEFAULT 'pending',
+  available_at TIMESTAMPTZ,
+  paid_out_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_provider_id ON provider_earnings (provider_id);
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_appointment_id ON provider_earnings (appointment_id);
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_service_history_id ON provider_earnings (service_history_id);
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_status ON provider_earnings (status);
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_provider_id_status ON provider_earnings (provider_id, status);
+CREATE INDEX IF NOT EXISTS idx_provider_earnings_created_at ON provider_earnings (created_at DESC);
+
+
+-- ROUTES
+POST /version/check check_version
+  FETCH app_versions -> latest (or 0)
+  RETURN 200
+GET /dl/:slug resolve_deeplink
+  FETCH deep_links -> link (or 404)
+  RETURN 200
+GET /admin/badges/pending admin_list_pending_badges
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY badges -> pending
+  RETURN 200
+POST /admin/badges/:id/review admin_review_badge
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH badges -> badge (or 404)
+  GUARD is_pending 400 "badge is not pending"
+  UPDATE badges -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.status" }, right: Path { value: "approved" } }
+      UPDATE users
+      COMPUTE notify_title
+      COMPUTE notify_push
+      INSERT notifications
+    DEFAULT
+      UPDATE users
+      Discriminant(4)
+      Discriminant(4)
+      INSERT notifications
+  RETURN 200
+GET /admin/reports admin_list_reports
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY user_reports -> reports
+  RETURN 200
+POST /admin/reports/:id/review admin_review_report
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH user_reports -> report (or 404)
+  UPDATE user_reports -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "warn" } }
+      UPDATE users
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "suspend" } }
+      UPDATE users
+    WHEN Compare { op: "=", left: Path { value: "body.action" }, right: Path { value: "ban" } }
+      UPDATE users
+    DEFAULT
+      Discriminant(4)
+  RETURN 200
+GET /admin/users/:id admin_get_user
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  FETCH users -> user (or 404)
+  RETURN 200
+PUT /admin/users/:id/status admin_update_user_status
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  UPDATE users -> updated
+  RETURN 200
+POST /admin/versions admin_create_version
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  INSERT app_versions -> created
+  RETURN 201
+GET /admin/versions admin_list_versions
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY app_versions -> versions
+  RETURN 200
+PUT /admin/versions/:id admin_update_version
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  UPDATE app_versions -> updated
+  RETURN 200
+POST /admin/deeplinks admin_create_deeplink
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  INSERT deep_links -> created
+  RETURN 201
+GET /admin/deeplinks admin_list_deeplinks
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY deep_links -> links
+  RETURN 200
+DELETE /admin/deeplinks/:id admin_delete_deeplink
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  DELETE deep_links
+  RETURN 204
+GET /admin/users admin_list_users
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> users
+  RETURN 200
+GET /admin/audit admin_list_audit_log
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY audit_logs -> logs
+  RETURN 200
+GET /admin/dashboard admin_dashboard
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> total_users
+  QUERY users -> active_users
+  QUERY users -> suspended_users
+  QUERY badges -> pending_badges
+  QUERY user_reports -> pending_reports
+  QUERY subscriptions -> active_subs
+  RETURN 200
+GET /admin/activity admin_recent_activity
+  auth: session
+  RULE must_be_admin
+    auth.is_admin = Literal { value: "TRUE" }
+  QUERY users -> recent_users
+  QUERY user_reports -> recent_reports
+  QUERY badges -> recent_badges
+  RETURN 200
+GET /health health
+  RETURN 200
+POST /auth/otp/request request_otp
+  COMPUTE sms_result = FuncCall { name: "sms.send_otp", args: [Path { value: "body.phone" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/otp/verify verify_otp
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT sessions
+      COMPUTE welcome_title
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/otp/email/request request_email_otp
+  COMPUTE otp_title = FuncCall { name: "T:email.otp.title", args: [] }
+  COMPUTE otp_message = FuncCall { name: "T:email.otp.message", args: [] }
+  COMPUTE otp_expiry = FuncCall { name: "T:email.otp.expiry_note", args: [Literal { value: "'5'" }] }
+  COMPUTE email_otp = FuncCall { name: "email.send_otp", args: [Path { value: "body.email" }, Literal { value: "'email/otp.html'" }, Path { value: "otp_message" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/otp/email/verify verify_email_otp
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+GET /auth/me get_me
+  auth: session
+  FETCH users -> user (or 404)
+  RETURN 200
+PUT /auth/profile update_profile
+  auth: session
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/logout logout
+  auth: session
+  DELETE sessions
+  RETURN 204
+GET /auth/sessions list_sessions
+  auth: session
+  QUERY sessions -> active_sessions
+  RETURN 200
+DELETE /auth/sessions/:id terminate_session
+  auth: session
+  FETCH sessions -> session (or 404)
+  GUARD ownership 403 "not your session"
+  DELETE sessions
+  RETURN 204
+POST /auth/session/refresh refresh_session
+  auth: session
+  UPDATE sessions -> refreshed
+  RETURN 200
+POST /auth/totp/setup totp_setup
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD not_already_enabled 400 "totp already enabled"
+  COMPUTE totp_data = FuncCall { name: "totp.generate_secret", args: [Path { value: "auth.user_id" }, Literal { value: "'Helperbook'" }] }
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/totp/enable totp_enable
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD has_secret 400 "call /auth/totp/setup first"
+  GUARD not_already_enabled 400 "totp already enabled"
+  COMPUTE verify = FuncCall { name: "totp.verify_code", args: [Path { value: "user.totp_secret" }, Path { value: "body.code" }] }
+  GUARD valid_code 401 "invalid totp code"
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/totp/disable totp_disable
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD is_enabled 400 "totp is not enabled"
+  COMPUTE verify = FuncCall { name: "totp.verify_code", args: [Path { value: "user.totp_secret" }, Path { value: "body.code" }] }
+  GUARD valid_code 401 "invalid totp code"
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/verify/phone request_phone_verify
+  auth: session
+  COMPUTE sms_result = FuncCall { name: "sms.send_otp", args: [Path { value: "body.phone" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/verify/phone/confirm confirm_phone_verify
+  auth: session
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/verify/email request_email_verify
+  auth: session
+  COMPUTE email_otp = FuncCall { name: "email.send_otp", args: [Path { value: "body.email" }, Literal { value: "'email/verify.html'" }, Path { value: "body.email" }] }
+  INSERT otp_codes -> otp_record
+  RETURN 200
+POST /auth/verify/email/confirm confirm_email_verify
+  auth: session
+  FETCH otp_codes -> otp (or 401)
+  GUARD not_expired 401 "code expired"
+  GUARD not_used 401 "code already used"
+  UPDATE otp_codes -> used_otp
+  UPDATE users -> updated
+  RETURN 200
+POST /auth/account/delete delete_account
+  auth: session
+  GUARD confirmed 400 "type DELETE to confirm"
+  UPDATE users -> deleted
+  DELETE sessions
+  RETURN 200
+POST /auth/social/google google_login
+  COMPUTE google = FuncCall { name: "google_auth.verify_token", args: [Path { value: "body.token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/apple apple_login
+  COMPUTE apple = FuncCall { name: "apple_auth.verify_token", args: [Path { value: "body.id_token" }, Path { value: "body.authorization_code" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+      COMPUTE welcome_greeting
+      COMPUTE welcome_body
+      COMPUTE welcome_footer
+      COMPUTE welcome_html
+      COMPUTE send_welcome
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/linkedin linkedin_login
+  COMPUTE tokens = FuncCall { name: "linkedin_auth.exchange_code", args: [Path { value: "body.code" }] }
+  COMPUTE profile = FuncCall { name: "linkedin_auth.get_profile", args: [Path { value: "tokens.access_token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /auth/social/meta meta_login
+  COMPUTE tokens = FuncCall { name: "meta_auth.exchange_code", args: [Path { value: "body.code" }] }
+  COMPUTE profile = FuncCall { name: "meta_auth.get_profile", args: [Path { value: "tokens.access_token" }] }
+  FETCH users -> user (or 0)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "user" }, right: Path { value: "null" } }
+      INSERT users
+      INSERT social_accounts
+      INSERT sessions
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      INSERT sessions
+  RETURN 200
+POST /webhooks/stripe/checkout stripe_checkout_completed
+  auth: webhook_signature
+  FETCH users -> buyer (or 200)
+  FETCH subscriptions -> existing_sub (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing_sub" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  COMPUTE billing_desc = FuncCall { name: "T:commerce.subscription.plus_monthly", args: [] }
+  INSERT billing_history -> billing_record
+  INSERT notifications -> sub_notif
+  RETURN 200
+POST /webhooks/stripe/cancel stripe_subscription_cancelled
+  auth: webhook_signature
+  FETCH users -> sub_user (or 200)
+  FETCH subscriptions -> active_sub (or 200)
+  UPDATE subscriptions -> cancelled
+  COMPUTE cancel_title = FuncCall { name: "T:commerce.subscription.cancelled", args: [] }
+  INSERT notifications -> cancel_notif
+  RETURN 200
+POST /webhooks/stripe/fail stripe_payment_failed
+  auth: webhook_signature
+  FETCH users -> failed_user (or 200)
+  COMPUTE fail_title = FuncCall { name: "T:commerce.subscription.payment_failed", args: [] }
+  INSERT notifications -> fail_notif
+  COMPUTE fail_push = FuncCall { name: "push.send_notification", args: [Path { value: "failed_user.id" }, Path { value: "fail_title" }, Path { value: "fail_title" }, Path { value: "body.subscription_id" }] }
+  RETURN 200
+POST /webhooks/:provider webhook_receiver
+  RETURN 200
+POST /auth/sessions/terminate-all terminate_all_sessions
+  auth: session
+  DELETE sessions
+  RETURN 200
+GET /subscription get_subscription
+  auth: session
+  FETCH subscriptions -> sub (or 0)
+  RETURN 200
+POST /subscription/checkout create_checkout
+  auth: session
+  COMPUTE checkout = FuncCall { name: "payment.create_checkout", args: [Path { value: "auth.user_id" }, Path { value: "body.plan" }, Path { value: "body.return_url" }] }
+  RETURN 200
+POST /subscription/activate activate_subscription
+  auth: session
+  FETCH subscriptions -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  COMPUTE billing_desc = FuncCall { name: "T:commerce.subscription.plus_monthly", args: [] }
+  INSERT billing_history -> billing
+  FETCH users -> sub_user (or 0)
+  INSERT notifications -> sub_notif
+  RETURN 200
+POST /subscription/cancel cancel_subscription
+  auth: session
+  FETCH subscriptions -> sub (or 404)
+  UPDATE subscriptions -> updated
+  RETURN 200
+GET /billing list_billing
+  auth: session
+  QUERY billing_history -> history
+  RETURN 200
+GET /history list_service_history
+  auth: session
+  QUERY service_history -> as_client
+  QUERY service_history -> as_provider
+  RETURN 200
+POST /history record_service
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "appointment must be completed"
+  GUARD is_participant 403 "not your appointment"
+  INSERT service_history -> record
+  RETURN 201
+GET /referral get_referral_info
+  auth: session
+  FETCH users -> user (or 404)
+  QUERY referrals -> referral_count
+  RETURN 200
+POST /referral/apply apply_referral
+  auth: session
+  FETCH users -> referrer (or 404)
+  GUARD not_self 400 "cannot use your own referral code"
+  INSERT referrals -> referral
+  FETCH subscriptions -> existing_sub (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing_sub" }, right: Path { value: "null" } }
+      UPDATE subscriptions
+    DEFAULT
+      INSERT subscriptions
+  UPDATE referrals -> rewarded
+  COMPUTE reward_title = FuncCall { name: "T:commerce.referral.reward_granted", args: [] }
+  INSERT notifications -> reward_notif
+  RETURN 201
+GET /earnings get_earnings
+  auth: session
+  QUERY provider_earnings -> earnings
+  RETURN 200
+GET /earnings/summary get_earnings_summary
+  auth: session
+  QUERY provider_earnings -> all_earnings
+  QUERY provider_earnings -> available
+  QUERY provider_earnings -> paid_out
+  RETURN 200
+GET /payout-methods list_payout_methods
+  auth: session
+  QUERY payout_methods -> methods
+  RETURN 200
+POST /payout-methods add_payout_method
+  auth: session
+  INSERT payout_methods -> method
+  RETURN 201
+PUT /payout-methods/:id update_payout_method
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD ownership 403 "not your payout method"
+  UPDATE payout_methods -> updated
+  RETURN 200
+DELETE /payout-methods/:id delete_payout_method
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD ownership 403 "not your payout method"
+  DELETE payout_methods
+  RETURN 204
+POST /payouts request_payout
+  auth: session
+  FETCH payout_methods -> method (or 404)
+  GUARD method_ownership 403 "not your payout method"
+  GUARD method_verified 400 "payout method not verified"
+  QUERY provider_earnings -> available
+  GUARD has_balance 400 "insufficient balance"
+  INSERT payouts -> payout
+  COMPUTE payout_title = FuncCall { name: "T:finance.payout_requested", args: [] }
+  INSERT notifications -> payout_notif
+  RETURN 201
+GET /payouts list_payouts
+  auth: session
+  QUERY payouts -> payouts
+  RETURN 200
+GET /payouts/:id get_payout
+  auth: session
+  FETCH payouts -> payout (or 404)
+  GUARD ownership 403 "not your payout"
+  RETURN 200
+POST /conversations start_conversation
+  auth: session
+  GUARD not_self 400 "cannot message yourself"
+  INSERT conversations -> conversation
+  INSERT conversation_participants -> p1
+  INSERT conversation_participants -> p2
+  RETURN 201
+POST /conversations/group create_group
+  auth: session
+  INSERT conversations -> conversation
+  INSERT conversation_participants -> creator_participant
+  RETURN 201
+PUT /conversations/:id/group update_group
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> participant (or 403)
+  GUARD is_admin 403 "only admins can edit group"
+  UPDATE conversations -> updated
+  RETURN 200
+POST /conversations/:id/members add_group_member
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> participant (or 403)
+  GUARD is_admin 403 "only admins can add members"
+  INSERT conversation_participants -> new_member
+  RETURN 201
+DELETE /conversations/:conv_id/members/:user_id remove_group_member
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  FETCH conversation_participants -> my_role (or 403)
+  GUARD is_admin 403 "only admins can remove members"
+  DELETE conversation_participants
+  RETURN 204
+POST /conversations/:id/leave leave_group
+  auth: session
+  FETCH conversations -> conversation (or 404)
+  GUARD is_group 400 "not a group conversation"
+  DELETE conversation_participants
+  RETURN 204
+GET /conversations list_conversations
+  auth: session
+  QUERY conversation_participants -> participations
+  RETURN 200
+POST /conversations/:id/messages send_message
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE moderation = FuncCall { name: "openai.moderate", args: [Path { value: "body.content" }] }
+  INSERT messages -> message
+  COMPUTE push_title = FuncCall { name: "T:push.new_message", args: [Path { value: "auth.user_id" }] }
+  COMPUTE push_preview = FuncCall { name: "RENDER:push/new_message.txt", args: [Path { value: "auth.user_id" }, Path { value: "body.content" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "participant.user_id" }, Path { value: "push_title" }, Path { value: "push_preview" }, Path { value: "message.id" }] }
+  INSERT notifications -> msg_notif
+  RETURN 201
+GET /conversations/:id/messages list_messages
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> msgs
+  RETURN 200
+PUT /messages/:id edit_message
+  auth: session
+  FETCH messages -> message (or 404)
+  GUARD is_sender 403 "not your message"
+  GUARD within_48h 400 "edit window expired"
+  UPDATE messages -> updated
+  RETURN 200
+DELETE /messages/:id delete_message
+  auth: session
+  FETCH messages -> message (or 404)
+  GUARD is_sender 403 "not your message"
+  GUARD within_48h 400 "delete window expired"
+  COMPUTE deleted_text = FuncCall { name: "T:common.message_deleted", args: [] }
+  UPDATE messages -> deleted
+  RETURN 200
+POST /conversations/:id/attachment upload_attachment
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  INSERT messages -> message
+  COMPUTE push_title = FuncCall { name: "T:push.new_attachment", args: [Path { value: "auth.user_id" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "participant.user_id" }, Path { value: "push_title" }, Path { value: "push_title" }, Path { value: "message.id" }] }
+  INSERT notifications -> attach_notif
+  RETURN 201
+POST /conversations/:id/read mark_read
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+POST /conversations/:id/archive archive_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+POST /conversations/:id/unarchive unarchive_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  UPDATE conversation_participants -> updated
+  RETURN 200
+GET /templates list_templates
+  auth: session
+  QUERY reply_templates -> templates
+  RETURN 200
+POST /templates create_template
+  auth: session
+  INSERT reply_templates -> template
+  RETURN 201
+PUT /templates/:id update_template
+  auth: session
+  FETCH reply_templates -> template (or 404)
+  GUARD ownership 403 "not your template"
+  UPDATE reply_templates -> updated
+  RETURN 200
+DELETE /templates/:id delete_template
+  auth: session
+  FETCH reply_templates -> template (or 404)
+  GUARD ownership 403 "not your template"
+  DELETE reply_templates
+  RETURN 204
+POST /messages/:id/translate translate_message
+  auth: session
+  FETCH messages -> message (or 404)
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE translation = FuncCall { name: "openai.translate", args: [Path { value: "message.content" }, Path { value: "body.target_lang" }] }
+  RETURN 200
+POST /conversations/:id/suggest suggest_replies
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> recent
+  COMPUTE suggestions = FuncCall { name: "openai.suggest_replies", args: [Path { value: "recent" }, Literal { value: "'provider'" }] }
+  RETURN 200
+POST /conversations/:id/summarize summarize_conversation
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  QUERY messages -> all_messages
+  COMPUTE summary = FuncCall { name: "openai.summarize", args: [Path { value: "all_messages" }, Literal { value: "5" }] }
+  RETURN 200
+GET /conversations/:id/search search_messages
+  auth: session
+  FETCH conversation_participants -> participant (or 403)
+  COMPUTE results = FuncCall { name: "search.search", args: [Literal { value: "'messages'" }, Path { value: "query.q" }, Path { value: "path.id" }, Literal { value: "20" }] }
+  RETURN 200
+GET /categories list_categories
+  auth: session
+  QUERY service_categories -> categories
+  RETURN 200
+GET /categories/:id get_category
+  auth: session
+  FETCH service_categories -> category (or 404)
+  RETURN 200
+GET /my/services list_my_services
+  auth: session
+  QUERY user_services -> services
+  RETURN 200
+POST /my/services add_service
+  auth: session
+  FETCH service_categories -> category (or 404)
+  INSERT user_services -> service
+  COMPUTE index_result = FuncCall { name: "search_providers.index", args: [Literal { value: "'providers'" }, Path { value: "service.id" }, Path { value: "body.description" }] }
+  RETURN 201
+PUT /my/services/:id update_service
+  auth: session
+  FETCH user_services -> service (or 404)
+  GUARD ownership 403 "not your service"
+  UPDATE user_services -> updated
+  COMPUTE reindex = FuncCall { name: "search_providers.index", args: [Literal { value: "'providers'" }, Path { value: "path.id" }, Path { value: "body.description" }] }
+  RETURN 200
+DELETE /my/services/:id delete_service
+  auth: session
+  FETCH user_services -> service (or 404)
+  GUARD ownership 403 "not your service"
+  DELETE user_services
+  COMPUTE deindex = FuncCall { name: "search_providers.remove", args: [Literal { value: "'providers'" }, Path { value: "path.id" }] }
+  RETURN 204
+POST /connections send_connection_request
+  auth: session
+  GUARD not_self 400 "cannot connect to yourself"
+  FETCH users -> target (or 404)
+  GUARD target_active 400 "user is not active"
+  INSERT connections -> connection
+  COMPUTE conn_title = FuncCall { name: "T:push.connection_request", args: [Path { value: "auth.user_id" }] }
+  COMPUTE conn_push = FuncCall { name: "push.send_notification", args: [Path { value: "body.contact_id" }, Path { value: "conn_title" }, Path { value: "body.message" }, Path { value: "connection.id" }] }
+  INSERT notifications -> conn_notif
+  RETURN 201
+GET /connections list_connections
+  auth: session
+  QUERY connections -> connections
+  RETURN 200
+GET /connections/incoming list_incoming_requests
+  auth: session
+  QUERY connections -> requests
+  RETURN 200
+PUT /connections/:id respond_connection
+  auth: session
+  FETCH connections -> connection (or 404)
+  GUARD is_recipient 403 "not your request"
+  GUARD is_pending 400 "request is not pending"
+  UPDATE connections -> updated
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.status" }, right: Path { value: "accepted" } }
+      COMPUTE accept_title
+      COMPUTE accept_push
+      INSERT notifications
+    DEFAULT
+      Discriminant(4)
+      Discriminant(4)
+      Discriminant(4)
+  RETURN 200
+DELETE /connections/:id remove_connection
+  auth: session
+  FETCH connections -> connection (or 404)
+  GUARD is_participant 403 "not your connection"
+  DELETE connections
+  RETURN 204
+POST /contacts/:contact_id/favorite add_favorite
+  auth: session
+  INSERT contact_favorites -> fav
+  RETURN 201
+DELETE /contacts/:contact_id/favorite remove_favorite
+  auth: session
+  DELETE contact_favorites
+  RETURN 204
+PUT /contacts/:contact_id/note upsert_note
+  auth: session
+  FETCH contact_notes -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE contact_notes
+    DEFAULT
+      INSERT contact_notes
+  RETURN 200
+GET /contacts/:contact_id/note get_note
+  auth: session
+  FETCH contact_notes -> note (or 404)
+  RETURN 200
+GET /folders list_folders
+  auth: session
+  QUERY contact_folders -> folders
+  RETURN 200
+POST /folders create_folder
+  auth: session
+  INSERT contact_folders -> folder
+  RETURN 201
+PUT /folders/:id update_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  UPDATE contact_folders -> updated
+  RETURN 200
+DELETE /folders/:id delete_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  DELETE contact_folders
+  RETURN 204
+POST /folders/:id/members add_to_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  INSERT contact_folder_members -> member
+  RETURN 201
+DELETE /folders/:folder_id/members/:contact_id remove_from_folder
+  auth: session
+  FETCH contact_folders -> folder (or 404)
+  GUARD ownership 403 "not your folder"
+  DELETE contact_folder_members
+  RETURN 204
+GET /network/search search_network
+  auth: session
+  COMPUTE results = FuncCall { name: "search_providers.search", args: [Literal { value: "'providers'" }, Path { value: "query.q" }, Path { value: "query.category_id" }, Literal { value: "20" }] }
+  RETURN 200
+GET /network/nearby nearby_providers
+  auth: session
+  QUERY users -> providers
+  RETURN 200
+POST /network/geocode geocode_address
+  auth: session
+  COMPUTE result = FuncCall { name: "geo.geocode", args: [Path { value: "body.address" }] }
+  RETURN 200
+POST /network/distance distance_to
+  auth: session
+  FETCH users -> me (or 404)
+  FETCH users -> provider (or 404)
+  COMPUTE dist = FuncCall { name: "geo.distance", args: [Path { value: "me.location_lat" }, Path { value: "me.location_lng" }, Path { value: "provider.location_lat" }, Path { value: "provider.location_lng" }] }
+  RETURN 200
+GET /network browse_network
+  auth: session
+  QUERY users -> providers
+  RETURN 200
+GET /profile/:slug get_profile
+  auth: session
+  FETCH users -> user (or 404)
+  GUARD is_active 404 "profile not found"
+  RETURN 200
+GET /profile/:user_id/services get_user_services
+  auth: session
+  QUERY user_services -> services
+  RETURN 200
+POST /reviews create_review
+  auth: session
+  GUARD valid_rating_min 400 "rating must be 1-5"
+  GUARD valid_rating_max 400 "rating must be 1-5"
+  GUARD not_self 400 "cannot review yourself"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "appointment must be completed"
+  COMPUTE moderation = FuncCall { name: "ai_moderation.moderate", args: [Path { value: "body.content" }] }
+  INSERT reviews -> review
+  COMPUTE review_title = FuncCall { name: "T:push.review_received", args: [Path { value: "body.rating" }] }
+  COMPUTE review_push = FuncCall { name: "push.send_notification", args: [Path { value: "body.reviewee_id" }, Path { value: "review_title" }, Path { value: "body.content" }, Path { value: "review.id" }] }
+  INSERT notifications -> review_notif
+  RETURN 201
+GET /reviews/:user_id list_reviews
+  auth: session
+  QUERY reviews -> user_reviews
+  RETURN 200
+POST /reviews/:id/respond respond_review
+  auth: session
+  FETCH reviews -> review (or 404)
+  GUARD is_reviewee 403 "only the reviewed user can respond"
+  GUARD no_existing_response 400 "already responded"
+  UPDATE reviews -> updated
+  RETURN 200
+POST /badges/id-check request_id_check
+  auth: session
+  FETCH badges -> existing (or 0)
+  GUARD no_pending 400 "you already have a pending request"
+  INSERT badges -> badge
+  RETURN 201
+POST /badges/document/selfie upload_badge_selfie
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+POST /badges/document/id-front upload_badge_id_front
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+POST /badges/document/id-back upload_badge_id_back
+  auth: session
+  FETCH badges -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE badges
+    DEFAULT
+      INSERT badges
+  RETURN 200
+GET /badges/status get_badge_status
+  auth: session
+  FETCH badges -> id_check (or 0)
+  RETURN 200
+POST /disputes open_dispute
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_completed 400 "can only dispute completed appointments"
+  INSERT disputes -> dispute
+  RETURN 201
+PUT /disputes/:id counter_dispute
+  auth: session
+  FETCH disputes -> dispute (or 404)
+  GUARD is_open 400 "dispute is not open"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_party 403 "not a party to this dispute"
+  UPDATE disputes -> updated
+  RETURN 200
+POST /disputes/:id/resolve resolve_dispute
+  auth: session
+  FETCH disputes -> dispute (or 404)
+  GUARD is_open 400 "dispute is not open"
+  FETCH appointments -> appointment (or 404)
+  GUARD is_party 403 "not a party to this dispute"
+  UPDATE disputes -> updated
+  RETURN 200
+GET /disputes list_disputes
+  auth: session
+  QUERY disputes -> disputes
+  RETURN 200
+POST /reports submit_report
+  auth: session
+  GUARD not_self 400 "cannot report yourself"
+  COMPUTE report_moderation = FuncCall { name: "ai_moderation.moderate", args: [Path { value: "body.description" }] }
+  INSERT user_reports -> report
+  RETURN 201
+GET /provider/profile get_provider_profile
+  auth: session
+  FETCH provider_profiles -> profile (or 404)
+  RETURN 200
+PUT /provider/profile upsert_provider_profile
+  auth: session
+  FETCH provider_profiles -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE provider_profiles
+    DEFAULT
+      INSERT provider_profiles
+  RETURN 200
+GET /provider/onboarding get_onboarding_status
+  auth: session
+  FETCH provider_onboarding -> onboarding (or 0)
+  RETURN 200
+POST /provider/onboarding start_onboarding
+  auth: session
+  FETCH provider_onboarding -> existing (or 0)
+  GUARD not_started 400 "onboarding already started"
+  INSERT provider_onboarding -> onboarding
+  UPDATE users -> user_updated
+  RETURN 201
+POST /provider/onboarding/advance advance_onboarding
+  auth: session
+  FETCH provider_onboarding -> onboarding (or 404)
+  MATCH
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "profile" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "services" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "availability" } }
+      UPDATE provider_onboarding
+    WHEN Compare { op: "=", left: Path { value: "body.step" }, right: Path { value: "documents" } }
+      UPDATE provider_onboarding
+    DEFAULT
+      UPDATE provider_onboarding
+  RETURN 200
+GET /provider/availability list_availability
+  auth: session
+  QUERY provider_availability -> slots
+  RETURN 200
+POST /provider/availability set_availability
+  auth: session
+  GUARD valid_day 400 "day_of_week must be 0-6"
+  GUARD valid_day_min 400 "day_of_week must be 0-6"
+  INSERT provider_availability -> slot
+  RETURN 201
+DELETE /provider/availability/:id delete_availability
+  auth: session
+  FETCH provider_availability -> slot (or 404)
+  GUARD ownership 403 "not your slot"
+  DELETE provider_availability
+  RETURN 204
+PUT /provider/status set_status
+  auth: session
+  FETCH provider_status -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE provider_status
+    DEFAULT
+      INSERT provider_status
+  RETURN 200
+GET /provider/status get_status
+  auth: session
+  FETCH provider_status -> status (or 0)
+  RETURN 200
+POST /appointments propose_appointment
+  auth: session
+  GUARD valid_time 400 "end must be after start"
+  GUARD future 400 "appointment must be in the future"
+  INSERT appointments -> appointment
+  COMPUTE notify_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "body.title" }, Path { value: "auth.user_id" }, Path { value: "body.start_at" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "body.provider_id" }, Path { value: "notify_title" }, Path { value: "body.notes" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> appt_notif
+  RETURN 201
+GET /appointments list_appointments
+  auth: session
+  QUERY appointments -> as_client
+  QUERY appointments -> as_provider
+  RETURN 200
+GET /appointments/:id get_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_participant 403 "not your appointment"
+  RETURN 200
+POST /appointments/:id/confirm confirm_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_pending 400 "appointment is not proposed"
+  UPDATE appointments -> updated
+  COMPUTE confirm_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE push_result = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.proposed_by" }, Path { value: "confirm_title" }, Path { value: "appointment.title" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> confirm_notif
+  RETURN 200
+POST /appointments/:id/dismiss dismiss_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_actionable 400 "appointment cannot be dismissed"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /appointments/:id/cancel cancel_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_cancelable 400 "appointment cannot be cancelled"
+  UPDATE appointments -> updated
+  COMPUTE cancel_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE cancel_push = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.provider_id" }, Path { value: "cancel_title" }, Path { value: "body.reason" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> cancel_notif
+  RETURN 200
+POST /appointments/:id/start start_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_confirmed 400 "appointment must be confirmed first"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /appointments/:id/complete complete_appointment
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_in_progress 400 "appointment must be in progress"
+  UPDATE appointments -> updated
+  COMPUTE complete_title = FuncCall { name: "T:push.appointment_reminder", args: [Path { value: "appointment.title" }, Path { value: "auth.user_id" }, Path { value: "appointment.start_at" }] }
+  COMPUTE complete_push = FuncCall { name: "push.send_notification", args: [Path { value: "appointment.client_id" }, Path { value: "complete_title" }, Path { value: "appointment.title" }, Path { value: "appointment.id" }] }
+  INSERT notifications -> complete_notif
+  RETURN 200
+POST /appointments/:id/no-show mark_no_show
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  GUARD is_confirmable 400 "appointment must be confirmed or in progress"
+  UPDATE appointments -> updated
+  RETURN 200
+POST /calendar/connect connect_calendar
+  auth: session
+  FETCH calendar_syncs -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE calendar_syncs
+    DEFAULT
+      INSERT calendar_syncs
+  RETURN 200
+DELETE /calendar/:provider disconnect_calendar
+  auth: session
+  DELETE calendar_syncs
+  RETURN 204
+GET /calendar/status get_calendar_status
+  auth: session
+  QUERY calendar_syncs -> syncs
+  RETURN 200
+POST /appointments/:id/calendar sync_appointment_to_calendar
+  auth: session
+  FETCH appointments -> appointment (or 404)
+  FETCH calendar_syncs -> cal_sync (or 400)
+  COMPUTE cal_event = FuncCall { name: "calendar.create_event", args: [Path { value: "cal_sync.access_token" }, Path { value: "appointment.title" }, Path { value: "appointment.start_at" }, Path { value: "appointment.end_at" }, Path { value: "appointment.location" }, Path { value: "appointment.notes" }] }
+  INSERT appointment_calendar_events -> link
+  RETURN 201
+DELETE /appointments/:id/calendar remove_from_calendar
+  auth: session
+  FETCH appointment_calendar_events -> link (or 404)
+  FETCH calendar_syncs -> cal_sync (or 400)
+  COMPUTE result = FuncCall { name: "calendar.delete_event", args: [Path { value: "cal_sync.access_token" }, Path { value: "link.external_event_id" }] }
+  DELETE appointment_calendar_events
+  RETURN 204
+GET /providers/:user_id/availability get_public_availability
+  auth: session
+  QUERY provider_availability -> slots
+  RETURN 200
+GET /providers/:user_id/status get_public_status
+  auth: session
+  FETCH provider_status -> status (or 0)
+  RETURN 200
+GET /settings get_settings
+  auth: session
+  FETCH user_settings -> settings (or 0)
+  RETURN 200
+PUT /settings update_settings
+  auth: session
+  FETCH user_settings -> existing (or 0)
+  MATCH
+    WHEN Compare { op: "!=", left: Path { value: "existing" }, right: Path { value: "null" } }
+      UPDATE user_settings
+    DEFAULT
+      INSERT user_settings
+  RETURN 200
+POST /blocked block_user
+  auth: session
+  GUARD not_self 400 "cannot block yourself"
+  INSERT blocked_users -> blocked
+  RETURN 201
+DELETE /blocked/:user_id unblock_user
+  auth: session
+  DELETE blocked_users
+  RETURN 204
+GET /blocked list_blocked
+  auth: session
+  QUERY blocked_users -> blocked
+  RETURN 200
+GET /notifications list_notifications
+  auth: session
+  QUERY notifications -> notifs
+  RETURN 200
+POST /notifications/:id/read mark_notification_read
+  auth: session
+  FETCH notifications -> notif (or 404)
+  GUARD ownership 403 "not your notification"
+  UPDATE notifications -> updated
+  RETURN 200
+POST /notifications/read-all mark_all_read
+  auth: session
+  QUERY notifications -> unread
+  UPDATE notifications -> updated
+  RETURN 200
+GET /notifications/unread-count unread_count
+  auth: session
+  QUERY notifications -> unread
+  RETURN 200
+POST /devices register_device
+  auth: session
+  INSERT device_tokens -> device
+  RETURN 201
+DELETE /devices/:id unregister_device
+  auth: session
+  FETCH device_tokens -> device (or 404)
+  GUARD ownership 403 "not your device"
+  DELETE device_tokens
+  RETURN 204
+POST /avatar/upload upload_avatar
+  auth: session
+  UPDATE users -> updated
+  RETURN 200
+POST /gallery/upload upload_gallery_image
+  auth: session
+  INSERT gallery_images -> image
+  RETURN 201
+GET /gallery list_gallery
+  auth: session
+  QUERY gallery_images -> images
+  RETURN 200
+POST /gallery add_gallery_image
+  auth: session
+  INSERT gallery_images -> image
+  RETURN 201
+DELETE /gallery/:id delete_gallery_image
+  auth: session
+  FETCH gallery_images -> image (or 404)
+  GUARD ownership 403 "not your image"
+  DELETE gallery_images
+  RETURN 204
+GET /profile/:user_id/gallery get_public_gallery
+  auth: session
+  QUERY gallery_images -> images
+  RETURN 200
+
+-- SURFACES
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "api",
+    "version": "v1"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health"
+      }
+    },
+    "/api/v1/version/check": {
+      "post": {
+        "operationId": "check_version"
+      }
+    },
+    "/api/v1/dl/{slug": {
+      "get": {
+        "operationId": "resolve_deeplink"
+      }
+    },
+    "/api/v1/auth/otp/request": {
+      "post": {
+        "operationId": "request_otp"
+      }
+    },
+    "/api/v1/auth/otp/verify": {
+      "post": {
+        "operationId": "verify_otp"
+      }
+    },
+    "/api/v1/auth/otp/email/request": {
+      "post": {
+        "operationId": "request_email_otp"
+      }
+    },
+    "/api/v1/auth/otp/email/verify": {
+      "post": {
+        "operationId": "verify_email_otp"
+      }
+    },
+    "/api/v1/auth/social/google": {
+      "post": {
+        "operationId": "google_login"
+      }
+    },
+    "/api/v1/auth/social/apple": {
+      "post": {
+        "operationId": "apple_login"
+      }
+    },
+    "/api/v1/auth/social/linkedin": {
+      "post": {
+        "operationId": "linkedin_login"
+      }
+    },
+    "/api/v1/auth/social/meta": {
+      "post": {
+        "operationId": "meta_login"
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "get_me"
+      }
+    },
+    "/api/v1/auth/profile": {
+      "put": {
+        "operationId": "update_profile"
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout"
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "operationId": "list_sessions"
+      }
+    },
+    "/api/v1/auth/sessions/{id}": {
+      "delete": {
+        "operationId": "terminate_session"
+      }
+    },
+    "/api/v1/auth/sessions/terminate-all": {
+      "post": {
+        "operationId": "terminate_all_sessions"
+      }
+    },
+    "/api/v1/auth/session/refresh": {
+      "post": {
+        "operationId": "refresh_session"
+      }
+    },
+    "/api/v1/auth/totp/setup": {
+      "post": {
+        "operationId": "totp_setup"
+      }
+    },
+    "/api/v1/auth/totp/enable": {
+      "post": {
+        "operationId": "totp_enable"
+      }
+    },
+    "/api/v1/auth/totp/disable": {
+      "post": {
+        "operationId": "totp_disable"
+      }
+    },
+    "/api/v1/auth/verify/phone": {
+      "post": {
+        "operationId": "request_phone_verify"
+      }
+    },
+    "/api/v1/auth/verify/phone/confirm": {
+      "post": {
+        "operationId": "confirm_phone_verify"
+      }
+    },
+    "/api/v1/auth/verify/email": {
+      "post": {
+        "operationId": "request_email_verify"
+      }
+    },
+    "/api/v1/auth/verify/email/confirm": {
+      "post": {
+        "operationId": "confirm_email_verify"
+      }
+    },
+    "/api/v1/auth/account/delete": {
+      "post": {
+        "operationId": "delete_account"
+      }
+    },
+    "/api/v1/webhooks/stripe/checkout": {
+      "post": {
+        "operationId": "stripe_checkout_completed"
+      }
+    },
+    "/api/v1/webhooks/stripe/cancel": {
+      "post": {
+        "operationId": "stripe_subscription_cancelled"
+      }
+    },
+    "/api/v1/webhooks/stripe/fail": {
+      "post": {
+        "operationId": "stripe_payment_failed"
+      }
+    },
+    "/api/v1/webhooks/{provider": {
+      "post": {
+        "operationId": "webhook_receiver"
+      }
+    },
+    "/api/v1/categories": {
+      "get": {
+        "operationId": "list_categories"
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "get": {
+        "operationId": "get_category"
+      }
+    },
+    "/api/v1/my/services": {
+      "get": {
+        "operationId": "list_my_services"
+      }
+    },
+    "/api/v1/my/services": {
+      "post": {
+        "operationId": "add_service"
+      }
+    },
+    "/api/v1/my/services/{id}": {
+      "put": {
+        "operationId": "update_service"
+      }
+    },
+    "/api/v1/my/services/{id}": {
+      "delete": {
+        "operationId": "delete_service"
+      }
+    },
+    "/api/v1/network": {
+      "get": {
+        "operationId": "browse_network"
+      }
+    },
+    "/api/v1/network/search": {
+      "get": {
+        "operationId": "search_network"
+      }
+    },
+    "/api/v1/network/nearby": {
+      "get": {
+        "operationId": "nearby_providers"
+      }
+    },
+    "/api/v1/network/geocode": {
+      "post": {
+        "operationId": "geocode_address"
+      }
+    },
+    "/api/v1/network/distance": {
+      "post": {
+        "operationId": "distance_to"
+      }
+    },
+    "/api/v1/profile/{slug": {
+      "get": {
+        "operationId": "get_profile"
+      }
+    },
+    "/api/v1/profile/{user_id/services": {
+      "get": {
+        "operationId": "get_user_services"
+      }
+    },
+    "/api/v1/profile/{user_id/gallery": {
+      "get": {
+        "operationId": "get_public_gallery"
+      }
+    },
+    "/api/v1/connections": {
+      "get": {
+        "operationId": "list_connections"
+      }
+    },
+    "/api/v1/connections": {
+      "post": {
+        "operationId": "send_connection_request"
+      }
+    },
+    "/api/v1/connections/incoming": {
+      "get": {
+        "operationId": "list_incoming_requests"
+      }
+    },
+    "/api/v1/connections/{id}": {
+      "put": {
+        "operationId": "respond_connection"
+      }
+    },
+    "/api/v1/connections/{id}": {
+      "delete": {
+        "operationId": "remove_connection"
+      }
+    },
+    "/api/v1/contacts/{contact_id/favorite": {
+      "post": {
+        "operationId": "add_favorite"
+      }
+    },
+    "/api/v1/contacts/{contact_id/favorite": {
+      "delete": {
+        "operationId": "remove_favorite"
+      }
+    },
+    "/api/v1/contacts/{contact_id/note": {
+      "put": {
+        "operationId": "upsert_note"
+      }
+    },
+    "/api/v1/contacts/{contact_id/note": {
+      "get": {
+        "operationId": "get_note"
+      }
+    },
+    "/api/v1/folders": {
+      "get": {
+        "operationId": "list_folders"
+      }
+    },
+    "/api/v1/folders": {
+      "post": {
+        "operationId": "create_folder"
+      }
+    },
+    "/api/v1/folders/{id}": {
+      "put": {
+        "operationId": "update_folder"
+      }
+    },
+    "/api/v1/folders/{id}": {
+      "delete": {
+        "operationId": "delete_folder"
+      }
+    },
+    "/api/v1/folders/{id}/members": {
+      "post": {
+        "operationId": "add_to_folder"
+      }
+    },
+    "/api/v1/folders/{folder_id/members/{contact_id": {
+      "delete": {
+        "operationId": "remove_from_folder"
+      }
+    },
+    "/api/v1/conversations": {
+      "get": {
+        "operationId": "list_conversations"
+      }
+    },
+    "/api/v1/conversations": {
+      "post": {
+        "operationId": "start_conversation"
+      }
+    },
+    "/api/v1/conversations/group": {
+      "post": {
+        "operationId": "create_group"
+      }
+    },
+    "/api/v1/conversations/{id}/group": {
+      "put": {
+        "operationId": "update_group"
+      }
+    },
+    "/api/v1/conversations/{id}/members": {
+      "post": {
+        "operationId": "add_group_member"
+      }
+    },
+    "/api/v1/conversations/{conv_id/members/{user_id": {
+      "delete": {
+        "operationId": "remove_group_member"
+      }
+    },
+    "/api/v1/conversations/{id}/leave": {
+      "post": {
+        "operationId": "leave_group"
+      }
+    },
+    "/api/v1/conversations/{id}/messages": {
+      "post": {
+        "operationId": "send_message"
+      }
+    },
+    "/api/v1/conversations/{id}/attachment": {
+      "post": {
+        "operationId": "upload_attachment"
+      }
+    },
+    "/api/v1/conversations/{id}/messages": {
+      "get": {
+        "operationId": "list_messages"
+      }
+    },
+    "/api/v1/conversations/{id}/read": {
+      "post": {
+        "operationId": "mark_read"
+      }
+    },
+    "/api/v1/conversations/{id}/archive": {
+      "post": {
+        "operationId": "archive_conversation"
+      }
+    },
+    "/api/v1/conversations/{id}/unarchive": {
+      "post": {
+        "operationId": "unarchive_conversation"
+      }
+    },
+    "/api/v1/conversations/{id}/suggest": {
+      "post": {
+        "operationId": "suggest_replies"
+      }
+    },
+    "/api/v1/conversations/{id}/summarize": {
+      "post": {
+        "operationId": "summarize_conversation"
+      }
+    },
+    "/api/v1/conversations/{id}/search": {
+      "get": {
+        "operationId": "search_messages"
+      }
+    },
+    "/api/v1/messages/{id}": {
+      "put": {
+        "operationId": "edit_message"
+      }
+    },
+    "/api/v1/messages/{id}": {
+      "delete": {
+        "operationId": "delete_message"
+      }
+    },
+    "/api/v1/messages/{id}/translate": {
+      "post": {
+        "operationId": "translate_message"
+      }
+    },
+    "/api/v1/templates": {
+      "get": {
+        "operationId": "list_templates"
+      }
+    },
+    "/api/v1/templates": {
+      "post": {
+        "operationId": "create_template"
+      }
+    },
+    "/api/v1/templates/{id}": {
+      "put": {
+        "operationId": "update_template"
+      }
+    },
+    "/api/v1/templates/{id}": {
+      "delete": {
+        "operationId": "delete_template"
+      }
+    },
+    "/api/v1/provider/onboarding": {
+      "get": {
+        "operationId": "get_onboarding_status"
+      }
+    },
+    "/api/v1/provider/onboarding": {
+      "post": {
+        "operationId": "start_onboarding"
+      }
+    },
+    "/api/v1/provider/onboarding/advance": {
+      "post": {
+        "operationId": "advance_onboarding"
+      }
+    },
+    "/api/v1/provider/profile": {
+      "get": {
+        "operationId": "get_provider_profile"
+      }
+    },
+    "/api/v1/provider/profile": {
+      "put": {
+        "operationId": "upsert_provider_profile"
+      }
+    },
+    "/api/v1/provider/availability": {
+      "get": {
+        "operationId": "list_availability"
+      }
+    },
+    "/api/v1/provider/availability": {
+      "post": {
+        "operationId": "set_availability"
+      }
+    },
+    "/api/v1/provider/availability/{id}": {
+      "delete": {
+        "operationId": "delete_availability"
+      }
+    },
+    "/api/v1/provider/status": {
+      "put": {
+        "operationId": "set_status"
+      }
+    },
+    "/api/v1/provider/status": {
+      "get": {
+        "operationId": "get_status"
+      }
+    },
+    "/api/v1/providers/{user_id/availability": {
+      "get": {
+        "operationId": "get_public_availability"
+      }
+    },
+    "/api/v1/providers/{user_id/status": {
+      "get": {
+        "operationId": "get_public_status"
+      }
+    },
+    "/api/v1/appointments": {
+      "get": {
+        "operationId": "list_appointments"
+      }
+    },
+    "/api/v1/appointments": {
+      "post": {
+        "operationId": "propose_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}": {
+      "get": {
+        "operationId": "get_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/confirm": {
+      "post": {
+        "operationId": "confirm_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/dismiss": {
+      "post": {
+        "operationId": "dismiss_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/start": {
+      "post": {
+        "operationId": "start_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/complete": {
+      "post": {
+        "operationId": "complete_appointment"
+      }
+    },
+    "/api/v1/appointments/{id}/no-show": {
+      "post": {
+        "operationId": "mark_no_show"
+      }
+    },
+    "/api/v1/appointments/{id}/calendar": {
+      "post": {
+        "operationId": "sync_appointment_to_calendar"
+      }
+    },
+    "/api/v1/appointments/{id}/calendar": {
+      "delete": {
+        "operationId": "remove_from_calendar"
+      }
+    },
+    "/api/v1/calendar/connect": {
+      "post": {
+        "operationId": "connect_calendar"
+      }
+    },
+    "/api/v1/calendar/{provider": {
+      "delete": {
+        "operationId": "disconnect_calendar"
+      }
+    },
+    "/api/v1/calendar/status": {
+      "get": {
+        "operationId": "get_calendar_status"
+      }
+    },
+    "/api/v1/reviews": {
+      "post": {
+        "operationId": "create_review"
+      }
+    },
+    "/api/v1/reviews/{user_id": {
+      "get": {
+        "operationId": "list_reviews"
+      }
+    },
+    "/api/v1/reviews/{id}/respond": {
+      "post": {
+        "operationId": "respond_review"
+      }
+    },
+    "/api/v1/badges/id-check": {
+      "post": {
+        "operationId": "request_id_check"
+      }
+    },
+    "/api/v1/badges/document/selfie": {
+      "post": {
+        "operationId": "upload_badge_selfie"
+      }
+    },
+    "/api/v1/badges/document/id-front": {
+      "post": {
+        "operationId": "upload_badge_id_front"
+      }
+    },
+    "/api/v1/badges/document/id-back": {
+      "post": {
+        "operationId": "upload_badge_id_back"
+      }
+    },
+    "/api/v1/badges/status": {
+      "get": {
+        "operationId": "get_badge_status"
+      }
+    },
+    "/api/v1/disputes": {
+      "post": {
+        "operationId": "open_dispute"
+      }
+    },
+    "/api/v1/disputes/{id}": {
+      "put": {
+        "operationId": "counter_dispute"
+      }
+    },
+    "/api/v1/disputes/{id}/resolve": {
+      "post": {
+        "operationId": "resolve_dispute"
+      }
+    },
+    "/api/v1/disputes": {
+      "get": {
+        "operationId": "list_disputes"
+      }
+    },
+    "/api/v1/reports": {
+      "post": {
+        "operationId": "submit_report"
+      }
+    },
+    "/api/v1/subscription": {
+      "get": {
+        "operationId": "get_subscription"
+      }
+    },
+    "/api/v1/subscription/checkout": {
+      "post": {
+        "operationId": "create_checkout"
+      }
+    },
+    "/api/v1/subscription/activate": {
+      "post": {
+        "operationId": "activate_subscription"
+      }
+    },
+    "/api/v1/subscription/cancel": {
+      "post": {
+        "operationId": "cancel_subscription"
+      }
+    },
+    "/api/v1/billing": {
+      "get": {
+        "operationId": "list_billing"
+      }
+    },
+    "/api/v1/history": {
+      "get": {
+        "operationId": "list_service_history"
+      }
+    },
+    "/api/v1/history": {
+      "post": {
+        "operationId": "record_service"
+      }
+    },
+    "/api/v1/referral": {
+      "get": {
+        "operationId": "get_referral_info"
+      }
+    },
+    "/api/v1/referral/apply": {
+      "post": {
+        "operationId": "apply_referral"
+      }
+    },
+    "/api/v1/earnings": {
+      "get": {
+        "operationId": "get_earnings"
+      }
+    },
+    "/api/v1/earnings/summary": {
+      "get": {
+        "operationId": "get_earnings_summary"
+      }
+    },
+    "/api/v1/payout-methods": {
+      "get": {
+        "operationId": "list_payout_methods"
+      }
+    },
+    "/api/v1/payout-methods": {
+      "post": {
+        "operationId": "add_payout_method"
+      }
+    },
+    "/api/v1/payout-methods/{id}": {
+      "put": {
+        "operationId": "update_payout_method"
+      }
+    },
+    "/api/v1/payout-methods/{id}": {
+      "delete": {
+        "operationId": "delete_payout_method"
+      }
+    },
+    "/api/v1/payouts": {
+      "post": {
+        "operationId": "request_payout"
+      }
+    },
+    "/api/v1/payouts": {
+      "get": {
+        "operationId": "list_payouts"
+      }
+    },
+    "/api/v1/payouts/{id}": {
+      "get": {
+        "operationId": "get_payout"
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "get_settings"
+      }
+    },
+    "/api/v1/settings": {
+      "put": {
+        "operationId": "update_settings"
+      }
+    },
+    "/api/v1/blocked": {
+      "get": {
+        "operationId": "list_blocked"
+      }
+    },
+    "/api/v1/blocked": {
+      "post": {
+        "operationId": "block_user"
+      }
+    },
+    "/api/v1/blocked/{user_id": {
+      "delete": {
+        "operationId": "unblock_user"
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "list_notifications"
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "post": {
+        "operationId": "mark_notification_read"
+      }
+    },
+    "/api/v1/notifications/read-all": {
+      "post": {
+        "operationId": "mark_all_read"
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "operationId": "unread_count"
+      }
+    },
+    "/api/v1/devices": {
+      "post": {
+        "operationId": "register_device"
+      }
+    },
+    "/api/v1/devices/{id}": {
+      "delete": {
+        "operationId": "unregister_device"
+      }
+    },
+    "/api/v1/avatar/upload": {
+      "post": {
+        "operationId": "upload_avatar"
+      }
+    },
+    "/api/v1/gallery": {
+      "get": {
+        "operationId": "list_gallery"
+      }
+    },
+    "/api/v1/gallery": {
+      "post": {
+        "operationId": "add_gallery_image"
+      }
+    },
+    "/api/v1/gallery/upload": {
+      "post": {
+        "operationId": "upload_gallery_image"
+      }
+    },
+    "/api/v1/gallery/{id}": {
+      "delete": {
+        "operationId": "delete_gallery_image"
+      }
+    },
+    "/api/v1/admin/badges/pending": {
+      "get": {
+        "operationId": "admin_list_pending_badges"
+      }
+    },
+    "/api/v1/admin/badges/{id}/review": {
+      "post": {
+        "operationId": "admin_review_badge"
+      }
+    },
+    "/api/v1/admin/reports": {
+      "get": {
+        "operationId": "admin_list_reports"
+      }
+    },
+    "/api/v1/admin/reports/{id}/review": {
+      "post": {
+        "operationId": "admin_review_report"
+      }
+    },
+    "/api/v1/admin/users": {
+      "get": {
+        "operationId": "admin_list_users"
+      }
+    },
+    "/api/v1/admin/users/{id}": {
+      "get": {
+        "operationId": "admin_get_user"
+      }
+    },
+    "/api/v1/admin/users/{id}/status": {
+      "put": {
+        "operationId": "admin_update_user_status"
+      }
+    },
+    "/api/v1/admin/versions": {
+      "post": {
+        "operationId": "admin_create_version"
+      }
+    },
+    "/api/v1/admin/versions": {
+      "get": {
+        "operationId": "admin_list_versions"
+      }
+    },
+    "/api/v1/admin/versions/{id}": {
+      "put": {
+        "operationId": "admin_update_version"
+      }
+    },
+    "/api/v1/admin/deeplinks": {
+      "post": {
+        "operationId": "admin_create_deeplink"
+      }
+    },
+    "/api/v1/admin/deeplinks": {
+      "get": {
+        "operationId": "admin_list_deeplinks"
+      }
+    },
+    "/api/v1/admin/deeplinks/{id}": {
+      "delete": {
+        "operationId": "admin_delete_deeplink"
+      }
+    },
+    "/api/v1/admin/audit": {
+      "get": {
+        "operationId": "admin_list_audit_log"
+      }
+    },
+    "/api/v1/admin/dashboard": {
+      "get": {
+        "operationId": "admin_dashboard"
+      }
+    },
+    "/api/v1/admin/activity": {
+      "get": {
+        "operationId": "admin_recent_activity"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+    }
+  }
+}
+
+-- STREAMS
+websocket /ws/chat chat_events
+sse /events/chat chat_sse
+websocket /ws/appointments appointment_events
+sse /events/appointments appointment_sse
+websocket /ws/notifications notification_events
+sse /events/notifications notification_sse

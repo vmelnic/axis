@@ -1,0 +1,28 @@
+{
+  "name": "sendgrid",
+  "version": "0.1.0",
+  "description": "Transactional email via SendGrid API",
+  "service": "email",
+  "methods": ["send", "send_template"],
+  "provider": "sendgrid",
+  "config": {
+    "api_key": { "env": "SENDGRID_API_KEY", "required": true, "secret": true },
+    "from_email": { "env": "SENDGRID_FROM_EMAIL", "required": true },
+    "from_name": { "env": "SENDGRID_FROM_NAME", "required": false, "default": "Helperbook" }
+  },
+  "endpoints": {
+    "send": {
+      "method": "POST",
+      "url": "https://api.sendgrid.com/v3/mail/send",
+      "input": { "to": "string", "subject": "string", "body": "string", "html": "bool" },
+      "output": { "success": "bool", "message_id": "string" }
+    },
+    "send_template": {
+      "method": "POST",
+      "url": "https://api.sendgrid.com/v3/mail/send",
+      "input": { "to": "string", "template_id": "string", "variables": "string" },
+      "output": { "success": "bool", "message_id": "string" }
+    }
+  },
+  "hot_swap": true
+}

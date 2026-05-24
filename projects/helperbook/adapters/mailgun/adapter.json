@@ -1,0 +1,29 @@
+{
+  "name": "mailgun",
+  "version": "0.1.0",
+  "description": "Transactional email via Mailgun API",
+  "service": "email",
+  "methods": ["send", "send_template"],
+  "provider": "mailgun",
+  "config": {
+    "api_key": { "env": "MAILGUN_API_KEY", "required": true, "secret": true },
+    "domain": { "env": "MAILGUN_DOMAIN", "required": true },
+    "from_email": { "env": "MAILGUN_FROM_EMAIL", "required": true },
+    "region": { "env": "MAILGUN_REGION", "required": false, "default": "eu" }
+  },
+  "endpoints": {
+    "send": {
+      "method": "POST",
+      "url": "https://api.${region}.mailgun.net/v3/${domain}/messages",
+      "input": { "to": "string", "subject": "string", "body": "string", "html": "bool" },
+      "output": { "success": "bool", "message_id": "string" }
+    },
+    "send_template": {
+      "method": "POST",
+      "url": "https://api.${region}.mailgun.net/v3/${domain}/messages",
+      "input": { "to": "string", "template_id": "string", "variables": "string" },
+      "output": { "success": "bool", "message_id": "string" }
+    }
+  },
+  "hot_swap": true
+}

@@ -1,0 +1,72 @@
+SHAPE Todo
+  id UUID PK AUTO
+  title STRING 200 REQUIRED
+  description TEXT
+  completed BOOL DEFAULT false
+  priority ENUM low medium high DEFAULT medium
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE todos POSTGRES
+  SHAPE Todo
+  INDEX id
+  INDEX completed
+
+REALM api
+  CAPABILITY read todos
+  CAPABILITY write todos
+
+FLOW list_todos get /todos
+  REALM api
+  PARAM completed BOOL
+  LET todos
+    QUERY todos
+      FILTER completed EQ query.completed
+      SORT created_at DESC
+      PAGE_SIZE 50
+  RETURN 200 todos
+
+FLOW get_todo get /todos/:id
+  REALM api
+  LET todo
+    FETCH todos
+      FILTER id EQ path.id
+    OR 404
+  RETURN 200 todo
+
+FLOW create_todo post /todos
+  REALM api
+  BODY NewTodo
+    title STRING 200 REQUIRED
+    description TEXT
+    priority ENUM low medium high
+  INSERT todos
+    title body.title
+    description body.description
+    priority body.priority
+  AS todo
+  RETURN 201 todo
+
+FLOW update_todo put /todos/:id
+  REALM api
+  BODY UpdateTodo
+    title STRING 200
+    description TEXT
+    completed BOOL
+    priority ENUM low medium high
+  UPDATE todos
+    WHERE id EQ path.id
+    SET title body.title
+    SET description body.description
+    SET completed body.completed
+    SET priority body.priority
+  AS todo
+  OR 404
+  RETURN 200 todo
+
+FLOW delete_todo delete /todos/:id
+  REALM api
+  DELETE todos
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204

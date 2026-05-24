@@ -1,0 +1,69 @@
+{
+  "name": "axis-lang",
+  "displayName": "Axis Language",
+  "description": "Language support for Axis — a backend API language for small LLMs",
+  "version": "0.1.0",
+  "publisher": "axis",
+  "icon": "icon.png",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vmelnic/soma"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:axis"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "axis",
+        "aliases": [
+          "Axis",
+          "axis"
+        ],
+        "extensions": [
+          ".axis"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "axis",
+        "scopeName": "source.axis",
+        "path": "./syntaxes/axis.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Axis",
+      "properties": {
+        "axis.server.path": {
+          "type": "string",
+          "default": "axis",
+          "description": "Path to the axis binary"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.0.0",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  }
+}

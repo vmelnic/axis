@@ -1,0 +1,1047 @@
+SHAPE User
+  id UUID PK AUTO
+  phone STRING 20 REQUIRED UNIQUE
+  phone_verified BOOL DEFAULT false
+  name STRING 100
+  avatar_url STRING 500
+  bio TEXT
+  location_lat DECIMAL PRECISION 10 SCALE 7
+  location_lng DECIMAL PRECISION 10 SCALE 7
+  location_name STRING 255
+  role ENUM client provider both DEFAULT client
+  slug STRING 30 UNIQUE
+  is_provider BOOL DEFAULT false
+  is_admin BOOL DEFAULT false
+  status ENUM active suspended deleted DEFAULT active
+  account_status ENUM active warned suspended banned DEFAULT active
+  badge_type ENUM id_check verified
+  badge_status ENUM pending approved rejected
+  badge_requested_at TIMESTAMP
+  badge_approved_at TIMESTAMP
+  email STRING 255 UNIQUE
+  email_verified BOOL DEFAULT false
+  totp_secret STRING 255
+  totp_enabled BOOL DEFAULT false
+  referral_code STRING 50 UNIQUE
+  last_seen TIMESTAMP
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SHAPE Session
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  device_info TEXT
+  ip_address STRING 45
+  last_active_at TIMESTAMP
+  expires_at TIMESTAMP REQUIRED
+  created_at TIMESTAMP AUTO
+
+SHAPE OtpCode
+  id UUID PK AUTO
+  phone STRING 20
+  email STRING 255
+  code STRING 10 REQUIRED
+  purpose ENUM login verify_phone verify_email recovery DEFAULT login
+  expires_at TIMESTAMP REQUIRED
+  used_at TIMESTAMP
+  created_at TIMESTAMP AUTO
+
+SHAPE SocialAccount
+  id UUID PK AUTO
+  user_id UUID REF User.id REQUIRED
+  provider ENUM google apple linkedin meta REQUIRED
+  provider_user_id STRING 255 REQUIRED
+  email STRING 255
+  created_at TIMESTAMP AUTO
+
+SOURCE users POSTGRES
+  SHAPE User
+  INDEX phone UNIQUE
+  INDEX slug UNIQUE
+  INDEX email UNIQUE
+  INDEX role
+  INDEX status
+  INDEX account_status
+  INDEX referral_code
+
+SOURCE sessions POSTGRES
+  SHAPE Session
+  INDEX user_id
+  INDEX expires_at
+
+SOURCE otp_codes POSTGRES
+  SHAPE OtpCode
+  INDEX phone code purpose
+  INDEX email code purpose
+
+SOURCE social_accounts POSTGRES
+  SHAPE SocialAccount
+  INDEX user_id
+  INDEX provider provider_user_id UNIQUE
+
+SERVICE sms
+  ENDPOINT SMS_SERVICE_URL
+  AUTH bearer VAULT SMS_API_KEY
+  METHOD send_otp
+    INPUT phone STRING 20
+    OUTPUT code STRING 10
+    OUTPUT success BOOL
+    TIMEOUT 10s
+    RETRY 2 BACKOFF exponential
+
+SERVICE google_auth
+  ENDPOINT GOOGLE_AUTH_SERVICE_URL
+  AUTH bearer VAULT GOOGLE_OAUTH_CLIENT_SECRET
+  METHOD verify_token
+    INPUT token STRING 500
+    OUTPUT sub STRING 255
+    OUTPUT email STRING 255
+    OUTPUT name STRING 100
+    OUTPUT picture STRING 500
+    OUTPUT email_verified BOOL
+    TIMEOUT 5s
+    RETRY 1 BACKOFF exponential
+
+SERVICE apple_auth
+  ENDPOINT APPLE_AUTH_SERVICE_URL
+  AUTH bearer VAULT APPLE_PRIVATE_KEY
+  METHOD verify_token
+    INPUT id_token STRING 2000
+    INPUT authorization_code STRING 500
+    OUTPUT sub STRING 255
+    OUTPUT email STRING 255
+    OUTPUT name STRING 100
+    OUTPUT email_verified BOOL
+    TIMEOUT 5s
+    RETRY 1 BACKOFF exponential
+
+SERVICE linkedin_auth
+  ENDPOINT LINKEDIN_AUTH_SERVICE_URL
+  AUTH bearer VAULT LINKEDIN_CLIENT_SECRET
+  METHOD exchange_code
+    INPUT code STRING 500
+    OUTPUT access_token STRING 500
+    OUTPUT expires_in INT
+    TIMEOUT 10s
+  METHOD get_profile
+    INPUT access_token STRING 500
+    OUTPUT sub STRING 255
+    OUTPUT email STRING 255
+    OUTPUT name STRING 100
+    OUTPUT picture STRING 500
+    TIMEOUT 5s
+
+SERVICE meta_auth
+  ENDPOINT META_AUTH_SERVICE_URL
+  AUTH bearer VAULT META_APP_SECRET
+  METHOD exchange_code
+    INPUT code STRING 500
+    OUTPUT access_token STRING 500
+    OUTPUT token_type STRING 50
+    OUTPUT expires_in INT
+    TIMEOUT 10s
+  METHOD get_profile
+    INPUT access_token STRING 500
+    OUTPUT id STRING 255
+    OUTPUT email STRING 255
+    OUTPUT name STRING 100
+    OUTPUT picture STRING 500
+    TIMEOUT 5s
+
+SERVICE totp
+  ENDPOINT TOTP_SERVICE_URL
+  AUTH bearer VAULT TOTP_SERVICE_KEY
+  METHOD generate_secret
+    INPUT user_id UUID
+    INPUT issuer STRING 100
+    OUTPUT secret STRING 255
+    OUTPUT qr_url STRING 500
+    TIMEOUT 5s
+  METHOD verify_code
+    INPUT secret STRING 255
+    INPUT code STRING 10
+    OUTPUT valid BOOL
+    TIMEOUT 5s
+
+REALM auth_realm
+  CAPABILITY read users
+  CAPABILITY write users
+  CAPABILITY read sessions
+  CAPABILITY write sessions
+  CAPABILITY read otp_codes
+  CAPABILITY write otp_codes
+  CAPABILITY read social_accounts
+  CAPABILITY write social_accounts
+  CAPABILITY write notifications
+  CAPABILITY read subscriptions
+  CAPABILITY write subscriptions
+  CAPABILITY read billing_history
+  CAPABILITY write billing_history
+  CAPABILITY call sms
+  CAPABILITY call email
+  CAPABILITY call push
+  CAPABILITY call google_auth
+  CAPABILITY call apple_auth
+  CAPABILITY call linkedin_auth
+  CAPABILITY call meta_auth
+  CAPABILITY call totp
+
+FLOW request_otp post /auth/otp/request
+  REALM auth_realm
+  LIMIT 5 per_minute per_ip
+  BODY OtpRequest
+    phone STRING 20 REQUIRED
+  LET sms_result
+    CALL sms.send_otp
+      phone body.phone
+    OR 502 "sms delivery failed"
+  INSERT otp_codes
+    phone body.phone
+    code sms_result.code
+    purpose login
+    expires_at NOW_PLUS 5 minutes
+  AS otp_record
+  RETURN 200
+    sent true
+
+FLOW verify_otp post /auth/otp/verify
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY OtpVerify
+    phone STRING 20 REQUIRED
+    code STRING 10 REQUIRED
+  LET otp
+    FETCH otp_codes
+      FILTER phone EQ body.phone
+      FILTER code EQ body.code
+      FILTER purpose EQ login
+    OR 401 "invalid code"
+  GUARD not_expired 401 "code expired"
+    GT otp.expires_at NOW
+  GUARD not_used 401 "code already used"
+    EQ otp.used_at null
+  UPDATE otp_codes
+    WHERE id EQ otp.id
+    SET used_at NOW
+  AS used_otp
+  OR 500
+  LET user
+    FETCH users
+      FILTER phone EQ body.phone
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        phone body.phone
+        phone_verified true
+        status active
+      AS new_user
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+      LET welcome_title
+        T "common.greeting" name new_user.phone
+      INSERT notifications
+        user_id new_user.id
+        type welcome
+        title welcome_title
+      AS welcome_notif
+    DEFAULT
+      LET new_user
+        null
+      LET welcome_title
+        null
+      LET welcome_notif
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+-- Email OTP (for users with email, no phone)
+FLOW request_email_otp post /auth/otp/email/request
+  REALM auth_realm
+  LIMIT 5 per_minute per_ip
+  BODY EmailOtpRequest
+    email STRING 255 REQUIRED
+  LET otp_title
+    T "email.otp.title"
+  LET otp_message
+    T "email.otp.message"
+  LET otp_expiry
+    T "email.otp.expiry_note" expiry_minutes "5"
+  LET email_otp
+    CALL email.send_otp
+      to body.email
+      template_id "email/otp.html"
+      variables otp_message
+    OR 502 "email delivery failed"
+  INSERT otp_codes
+    email body.email
+    code email_otp.code
+    purpose verify_email
+    expires_at NOW_PLUS 5 minutes
+  AS otp_record
+  RETURN 200
+    sent true
+
+FLOW verify_email_otp post /auth/otp/email/verify
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY EmailOtpVerify
+    email STRING 255 REQUIRED
+    code STRING 10 REQUIRED
+  LET otp
+    FETCH otp_codes
+      FILTER email EQ body.email
+      FILTER code EQ body.code
+      FILTER purpose EQ verify_email
+    OR 401 "invalid code"
+  GUARD not_expired 401 "code expired"
+    GT otp.expires_at NOW
+  GUARD not_used 401 "code already used"
+    EQ otp.used_at null
+  UPDATE otp_codes
+    WHERE id EQ otp.id
+    SET used_at NOW
+  AS used_otp
+  OR 500
+  LET user
+    FETCH users
+      FILTER email EQ body.email
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        email body.email
+        email_verified true
+        status active
+      AS new_user
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+      LET welcome_greeting
+        T "email.welcome.greeting" name body.email
+      LET welcome_body
+        T "email.welcome.body"
+      LET welcome_footer
+        T "email.welcome.footer"
+      LET welcome_html
+        RENDER "email/welcome.html" greeting welcome_greeting body welcome_body footer welcome_footer
+      LET send_welcome
+        CALL email.send
+          to body.email
+          subject welcome_greeting
+          body welcome_html
+          html true
+        OR 0 "ok"
+      INSERT notifications
+        user_id new_user.id
+        type welcome
+        title welcome_greeting
+        body welcome_body
+      AS welcome_notif
+    DEFAULT
+      LET new_user
+        null
+      LET welcome_greeting
+        null
+      LET welcome_body
+        null
+      LET welcome_footer
+        null
+      LET welcome_html
+        null
+      LET send_welcome
+        null
+      LET welcome_notif
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+FLOW get_me get /auth/me
+  REALM auth_realm
+  AUTH session
+  LET user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404 "user not found"
+  RETURN 200 user
+
+FLOW update_profile put /auth/profile
+  REALM auth_realm
+  AUTH session
+  BODY ProfileUpdate
+    name STRING 100
+    bio TEXT
+    avatar_url STRING 500
+    location_lat DECIMAL
+    location_lng DECIMAL
+    location_name STRING 255
+    slug STRING 30
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET name body.name
+    SET bio body.bio
+    SET avatar_url body.avatar_url
+    SET location_lat body.location_lat
+    SET location_lng body.location_lng
+    SET location_name body.location_name
+    SET slug body.slug
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+FLOW logout post /auth/logout
+  REALM auth_realm
+  AUTH session
+  DELETE sessions
+    WHERE id EQ auth.session_id
+  OR 404
+  RETURN 204
+
+FLOW list_sessions get /auth/sessions
+  REALM auth_realm
+  AUTH session
+  LET active_sessions
+    QUERY sessions
+      FILTER user_id EQ auth.user_id
+      SORT last_active_at DESC
+      PAGE_SIZE 50
+  RETURN 200 active_sessions
+
+FLOW terminate_session delete /auth/sessions/:id
+  REALM auth_realm
+  AUTH session
+  LET session
+    FETCH sessions
+      FILTER id EQ path.id
+    OR 404 "session not found"
+  GUARD ownership 403 "not your session"
+    EQ session.user_id auth.user_id
+  DELETE sessions
+    WHERE id EQ path.id
+  OR 404
+  RETURN 204
+
+-- Session refresh
+FLOW refresh_session post /auth/session/refresh
+  REALM auth_realm
+  AUTH session
+  UPDATE sessions
+    WHERE id EQ auth.session_id
+    SET expires_at NOW_PLUS 30 days
+    SET last_active_at NOW
+  AS refreshed
+  OR 404 "session not found"
+  RETURN 200 refreshed
+
+-- TOTP enrollment
+FLOW totp_setup post /auth/totp/setup
+  REALM auth_realm
+  AUTH session
+  LET user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404 "user not found"
+  GUARD not_already_enabled 400 "totp already enabled"
+    EQ user.totp_enabled false
+  LET totp_data
+    CALL totp.generate_secret
+      user_id auth.user_id
+      issuer "Helperbook"
+    OR 502 "totp service unavailable"
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET totp_secret totp_data.secret
+  AS updated
+  OR 404
+  RETURN 200
+    qr_url totp_data.qr_url
+
+FLOW totp_enable post /auth/totp/enable
+  REALM auth_realm
+  AUTH session
+  BODY TotpEnable
+    code STRING 10 REQUIRED
+  LET user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404 "user not found"
+  GUARD has_secret 400 "call /auth/totp/setup first"
+    NEQ user.totp_secret null
+  GUARD not_already_enabled 400 "totp already enabled"
+    EQ user.totp_enabled false
+  LET verify
+    CALL totp.verify_code
+      secret user.totp_secret
+      code body.code
+    OR 502 "totp service unavailable"
+  GUARD valid_code 401 "invalid totp code"
+    EQ verify.valid true
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET totp_enabled true
+  AS updated
+  OR 404
+  RETURN 200
+    enabled true
+
+FLOW totp_disable post /auth/totp/disable
+  REALM auth_realm
+  AUTH session
+  BODY TotpDisable
+    code STRING 10 REQUIRED
+  LET user
+    FETCH users
+      FILTER id EQ auth.user_id
+    OR 404 "user not found"
+  GUARD is_enabled 400 "totp is not enabled"
+    EQ user.totp_enabled true
+  LET verify
+    CALL totp.verify_code
+      secret user.totp_secret
+      code body.code
+    OR 502 "totp service unavailable"
+  GUARD valid_code 401 "invalid totp code"
+    EQ verify.valid true
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET totp_enabled false
+    SET totp_secret null
+  AS updated
+  OR 404
+  RETURN 200
+    disabled true
+
+-- Phone verification (for existing users adding/changing phone)
+FLOW request_phone_verify post /auth/verify/phone
+  REALM auth_realm
+  AUTH session
+  LIMIT 3 per_minute per_user
+  BODY PhoneVerifyRequest
+    phone STRING 20 REQUIRED
+  LET sms_result
+    CALL sms.send_otp
+      phone body.phone
+    OR 502 "sms delivery failed"
+  INSERT otp_codes
+    phone body.phone
+    code sms_result.code
+    purpose verify_phone
+    expires_at NOW_PLUS 5 minutes
+  AS otp_record
+  RETURN 200
+    sent true
+
+FLOW confirm_phone_verify post /auth/verify/phone/confirm
+  REALM auth_realm
+  AUTH session
+  LIMIT 10 per_minute per_user
+  BODY PhoneVerifyConfirm
+    phone STRING 20 REQUIRED
+    code STRING 10 REQUIRED
+  LET otp
+    FETCH otp_codes
+      FILTER phone EQ body.phone
+      FILTER code EQ body.code
+      FILTER purpose EQ verify_phone
+    OR 401 "invalid code"
+  GUARD not_expired 401 "code expired"
+    GT otp.expires_at NOW
+  GUARD not_used 401 "code already used"
+    EQ otp.used_at null
+  UPDATE otp_codes
+    WHERE id EQ otp.id
+    SET used_at NOW
+  AS used_otp
+  OR 500
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET phone body.phone
+    SET phone_verified true
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Email verification (for existing users adding/changing email)
+FLOW request_email_verify post /auth/verify/email
+  REALM auth_realm
+  AUTH session
+  LIMIT 3 per_minute per_user
+  BODY EmailVerifyRequest
+    email STRING 255 REQUIRED
+  LET email_otp
+    CALL email.send_otp
+      to body.email
+      template_id "email/verify.html"
+      variables body.email
+    OR 502 "email delivery failed"
+  INSERT otp_codes
+    email body.email
+    code email_otp.code
+    purpose verify_email
+    expires_at NOW_PLUS 10 minutes
+  AS otp_record
+  RETURN 200
+    sent true
+
+FLOW confirm_email_verify post /auth/verify/email/confirm
+  REALM auth_realm
+  AUTH session
+  LIMIT 10 per_minute per_user
+  BODY EmailVerifyConfirm
+    email STRING 255 REQUIRED
+    code STRING 10 REQUIRED
+  LET otp
+    FETCH otp_codes
+      FILTER email EQ body.email
+      FILTER code EQ body.code
+      FILTER purpose EQ verify_email
+    OR 401 "invalid code"
+  GUARD not_expired 401 "code expired"
+    GT otp.expires_at NOW
+  GUARD not_used 401 "code already used"
+    EQ otp.used_at null
+  UPDATE otp_codes
+    WHERE id EQ otp.id
+    SET used_at NOW
+  AS used_otp
+  OR 500
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET email body.email
+    SET email_verified true
+  AS updated
+  OR 404
+  RETURN 200 updated
+
+-- Account deletion (soft delete)
+FLOW delete_account post /auth/account/delete
+  REALM auth_realm
+  AUTH session
+  BODY DeleteAccount
+    confirmation STRING 50 REQUIRED
+  GUARD confirmed 400 "type DELETE to confirm"
+    EQ body.confirmation "DELETE"
+  UPDATE users
+    WHERE id EQ auth.user_id
+    SET status deleted
+    SET name null
+    SET bio null
+    SET avatar_url null
+    SET phone_verified false
+    SET email_verified false
+    SET totp_enabled false
+    SET totp_secret null
+  AS deleted
+  OR 404
+  DELETE sessions
+    WHERE user_id EQ auth.user_id
+  OR 0 "ok"
+  RETURN 200
+    deleted true
+
+-- Social login: Google
+FLOW google_login post /auth/social/google
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY GoogleLogin
+    token STRING 2000 REQUIRED
+  LET google
+    CALL google_auth.verify_token
+      token body.token
+    OR 401 "invalid google token"
+  LET user
+    FETCH users
+      FILTER email EQ google.email
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        email google.email
+        email_verified true
+        name google.name
+        avatar_url google.picture
+        status active
+      AS new_user
+      INSERT social_accounts
+        user_id new_user.id
+        provider google
+        provider_user_id google.sub
+        email google.email
+      AS social
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+      LET welcome_greeting
+        T "email.welcome.greeting" name new_user.name
+      LET welcome_body
+        T "email.welcome.body"
+      LET welcome_footer
+        T "email.welcome.footer"
+      LET welcome_html
+        RENDER "email/welcome.html" greeting welcome_greeting body welcome_body footer welcome_footer
+      LET send_welcome
+        CALL email.send
+          to new_user.email
+          subject welcome_greeting
+          body welcome_html
+          html true
+        OR 0 "ok"
+      INSERT notifications
+        user_id new_user.id
+        type welcome
+        title welcome_greeting
+        body welcome_body
+      AS welcome_notif
+    DEFAULT
+      LET new_user
+        null
+      LET social
+        null
+      LET welcome_greeting
+        null
+      LET welcome_body
+        null
+      LET welcome_footer
+        null
+      LET welcome_html
+        null
+      LET send_welcome
+        null
+      LET welcome_notif
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+-- Social login: Apple
+FLOW apple_login post /auth/social/apple
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY AppleLogin
+    id_token STRING 2000 REQUIRED
+    authorization_code STRING 500 REQUIRED
+    name STRING 100
+  LET apple
+    CALL apple_auth.verify_token
+      id_token body.id_token
+      authorization_code body.authorization_code
+    OR 401 "invalid apple token"
+  LET user
+    FETCH users
+      FILTER email EQ apple.email
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        email apple.email
+        email_verified true
+        name body.name
+        status active
+      AS new_user
+      INSERT social_accounts
+        user_id new_user.id
+        provider apple
+        provider_user_id apple.sub
+        email apple.email
+      AS social
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+      LET welcome_greeting
+        T "email.welcome.greeting" name new_user.name
+      LET welcome_body
+        T "email.welcome.body"
+      LET welcome_footer
+        T "email.welcome.footer"
+      LET welcome_html
+        RENDER "email/welcome.html" greeting welcome_greeting body welcome_body footer welcome_footer
+      LET send_welcome
+        CALL email.send
+          to new_user.email
+          subject welcome_greeting
+          body welcome_html
+          html true
+        OR 0 "ok"
+      INSERT notifications
+        user_id new_user.id
+        type welcome
+        title welcome_greeting
+        body welcome_body
+      AS welcome_notif
+    DEFAULT
+      LET new_user
+        null
+      LET social
+        null
+      LET welcome_greeting
+        null
+      LET welcome_body
+        null
+      LET welcome_footer
+        null
+      LET welcome_html
+        null
+      LET send_welcome
+        null
+      LET welcome_notif
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+-- Social login: LinkedIn (optional)
+FLOW linkedin_login post /auth/social/linkedin
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY LinkedInLogin
+    code STRING 500 REQUIRED
+  LET tokens
+    CALL linkedin_auth.exchange_code
+      code body.code
+    OR 401 "linkedin auth failed"
+  LET profile
+    CALL linkedin_auth.get_profile
+      access_token tokens.access_token
+    OR 502 "linkedin profile fetch failed"
+  LET user
+    FETCH users
+      FILTER email EQ profile.email
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        email profile.email
+        email_verified true
+        name profile.name
+        avatar_url profile.picture
+        status active
+      AS new_user
+      INSERT social_accounts
+        user_id new_user.id
+        provider linkedin
+        provider_user_id profile.sub
+        email profile.email
+      AS social
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+    DEFAULT
+      LET new_user
+        null
+      LET social
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+-- Social login: Meta (optional)
+FLOW meta_login post /auth/social/meta
+  REALM auth_realm
+  LIMIT 10 per_minute per_ip
+  BODY MetaLogin
+    code STRING 500 REQUIRED
+  LET tokens
+    CALL meta_auth.exchange_code
+      code body.code
+    OR 401 "meta auth failed"
+  LET profile
+    CALL meta_auth.get_profile
+      access_token tokens.access_token
+    OR 502 "meta profile fetch failed"
+  LET user
+    FETCH users
+      FILTER email EQ profile.email
+    OR 0 "ok"
+  MATCH
+    WHEN EQ user null
+      INSERT users
+        email profile.email
+        email_verified true
+        name profile.name
+        avatar_url profile.picture
+        status active
+      AS new_user
+      INSERT social_accounts
+        user_id new_user.id
+        provider meta
+        provider_user_id profile.id
+        email profile.email
+      AS social
+      INSERT sessions
+        user_id new_user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+    DEFAULT
+      LET new_user
+        null
+      LET social
+        null
+      INSERT sessions
+        user_id user.id
+
+        expires_at NOW_PLUS 30 days
+      AS session
+  RETURN 200 session
+
+-- Webhook: Stripe checkout completed
+FLOW stripe_checkout_completed post /webhooks/stripe/checkout
+  REALM auth_realm
+  AUTH WEBHOOK SIGNATURE stripe_webhook_secret HMAC sha256
+  BODY StripeCheckoutEvent
+    customer_email STRING 255 REQUIRED
+    subscription_id STRING 255 REQUIRED
+    amount INT
+    currency STRING 10
+  LET buyer
+    FETCH users
+      FILTER email EQ body.customer_email
+    OR 200 "acknowledged"
+  LET existing_sub
+    FETCH subscriptions
+      FILTER user_id EQ buyer.id
+      FILTER status EQ active
+    OR 0 "ok"
+  MATCH
+    WHEN NEQ existing_sub null
+      UPDATE subscriptions
+        WHERE id EQ existing_sub.id
+        SET plan plus
+        SET payment_provider stripe
+        SET provider_subscription_id body.subscription_id
+        SET expires_at NOW_PLUS 30 days
+      AS activated
+      OR 404
+    DEFAULT
+      INSERT subscriptions
+        user_id buyer.id
+        plan plus
+        status active
+        payment_provider stripe
+        provider_subscription_id body.subscription_id
+        expires_at NOW_PLUS 30 days
+      AS activated
+  LET billing_desc
+    T "commerce.subscription.plus_monthly"
+  INSERT billing_history
+    user_id buyer.id
+    amount body.amount
+    currency USD
+    description billing_desc
+    status paid
+    payment_provider stripe
+    provider_transaction_id body.subscription_id
+  AS billing_record
+  INSERT notifications
+    user_id buyer.id
+    type subscription_changed
+    title billing_desc
+  AS sub_notif
+  RETURN 200
+    received true
+
+-- Webhook: Stripe subscription cancelled
+FLOW stripe_subscription_cancelled post /webhooks/stripe/cancel
+  REALM auth_realm
+  AUTH WEBHOOK SIGNATURE stripe_webhook_secret HMAC sha256
+  BODY StripeCancelEvent
+    customer_email STRING 255 REQUIRED
+    subscription_id STRING 255 REQUIRED
+  LET sub_user
+    FETCH users
+      FILTER email EQ body.customer_email
+    OR 200 "acknowledged"
+  LET active_sub
+    FETCH subscriptions
+      FILTER user_id EQ sub_user.id
+      FILTER provider_subscription_id EQ body.subscription_id
+    OR 200 "acknowledged"
+  UPDATE subscriptions
+    WHERE id EQ active_sub.id
+    SET status cancelled
+    SET cancelled_at NOW
+  AS cancelled
+  OR 200 "acknowledged"
+  LET cancel_title
+    T "commerce.subscription.cancelled"
+  INSERT notifications
+    user_id sub_user.id
+    type subscription_changed
+    title cancel_title
+  AS cancel_notif
+  RETURN 200
+    received true
+
+-- Webhook: Stripe payment failed
+FLOW stripe_payment_failed post /webhooks/stripe/fail
+  REALM auth_realm
+  AUTH WEBHOOK SIGNATURE stripe_webhook_secret HMAC sha256
+  BODY StripeFailEvent
+    customer_email STRING 255 REQUIRED
+    subscription_id STRING 255
+  LET failed_user
+    FETCH users
+      FILTER email EQ body.customer_email
+    OR 200 "acknowledged"
+  LET fail_title
+    T "commerce.subscription.payment_failed"
+  INSERT notifications
+    user_id failed_user.id
+    type subscription_changed
+    title fail_title
+  AS fail_notif
+  LET fail_push
+    CALL push.send_notification
+      user_id failed_user.id
+      title fail_title
+      body fail_title
+      data body.subscription_id
+    OR 0 "ok"
+  RETURN 200
+    received true
+
+-- Webhook: generic events
+FLOW webhook_receiver post /webhooks/:provider
+  REALM auth_realm
+  BODY WebhookPayload
+    event STRING 100
+    data TEXT
+  RETURN 200
+    received true
+
+FLOW terminate_all_sessions post /auth/sessions/terminate-all
+  REALM auth_realm
+  AUTH session
+  DELETE sessions
+    WHERE user_id EQ auth.user_id
+  OR 0 "ok"
+  RETURN 200
+    terminated true
