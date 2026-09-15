@@ -15,11 +15,13 @@ FLOW <name> <method> <path>
   [BODY <ShapeName> ...]
   [PARAM <name> <type> [modifiers...]]
   [HEADER <name> <type> [modifiers...]]
+  [IDEMPOTENCY <key_path> SCOPE <scope_path> TTL <seconds>]
   [RULE ...]
   [GUARD ...]
   [LET ...]
   [SET ...]
-  [INSERT ... / UPDATE ... / DELETE ...]
+  [INSERT ... / UPSERT ... / UPDATE ... / DELETE ...]
+  [FANOUT ...]
   [EACH ...]
   [TRY ... RECOVER ...]
   [MATCH ...]
@@ -88,10 +90,10 @@ FLOW create_booking POST /bookings
 
 The compiler enforces operation ordering within a flow:
 
-1. **Declarations**: AUTH, LIMIT, CACHE, SCOPE, TIMEOUT, BODY, PARAM, HEADER (any order among these)
+1. **Declarations**: AUTH, LIMIT, CACHE, SCOPE, TIMEOUT, BODY, PARAM, HEADER, IDEMPOTENCY (any order among these)
 2. **Validations**: RULE, GUARD (must precede mutations)
 3. **Computations**: LET, FETCH, QUERY, CALL, MATCH, SET, EACH, TRY (topological order -- can only reference earlier bindings)
-4. **Mutations**: INSERT, UPDATE, DELETE (after all validations)
+4. **Mutations**: INSERT, UPSERT, UPDATE, DELETE, FANOUT (after all validations)
 5. **Effects**: EFFECT, UPLOAD (after mutations)
 6. **Return**: RETURN (exactly one, always last)
 
@@ -105,6 +107,7 @@ All flow operations are documented in detail in [Flow Operations](../flow-operat
 - **BODY** -- request body declaration
 - **PARAM** -- query string parameters
 - **HEADER** -- request header declarations
+- **IDEMPOTENCY** -- reserve a scoped operation key and replay its exact committed response
 - **RULE** -- named authorization checks
 - **GUARD** -- inline validation with error codes
 - **LET** -- immutable variable binding
@@ -112,8 +115,10 @@ All flow operations are documented in detail in [Flow Operations](../flow-operat
 - **FETCH** -- single-row lookup
 - **QUERY** -- multi-row query with filtering and pagination
 - **INSERT** -- insert a new row
+- **UPSERT** -- atomically insert or update through a declared unique key
 - **UPDATE** -- update existing rows
 - **DELETE** -- delete rows
+- **FANOUT** -- bulk-insert a collection with one SQL statement
 - **CALL** -- invoke external service
 - **EFFECT** -- asynchronous side effects
 - **MATCH** -- multi-way branching
@@ -121,6 +126,31 @@ All flow operations are documented in detail in [Flow Operations](../flow-operat
 - **TRY/RECOVER** -- error recovery
 - **UPLOAD** -- file upload to storage
 - **RETURN** -- response definition
+
+## Atomic Messenger-Style Commands
+
+`IDEMPOTENCY` turns the flow into one database transaction. The key reservation, every SQL read and mutation, transactional outbox writes, and the stored HTTP response commit together. A retry with the same scope, key, and request returns the stored status, body, and headers with `Idempotency-Replayed: true`; the same key with a different request returns `409`.
+
+```axis
+FLOW deliver_message POST /messages/:id/deliver
+  HEADER idempotency_key STRING 255 REQUIRED
+  BODY DeliveryCommand
+    actor_id UUID REQUIRED
+    recipients LIST UUID REQUIRED
+  IDEMPOTENCY header.idempotency_key SCOPE body.actor_id TTL 86400
+  UPSERT receipts
+    KEY message_id path.id
+    KEY user_id body.actor_id
+    SET status "delivered"
+  AS receipt
+  FANOUT recipient IN body.recipients
+    INSERT delivery_events
+      message_id path.id
+      recipient_id recipient
+  RETURN 201 receipt
+```
+
+An idempotent flow must mutate at least one transactional SQL source. All SQL sources must use one dialect and resolve to the same physical database URL at runtime. Direct service calls, `TRY`, and `UPLOAD` are rejected because they cannot participate in the database transaction; represent external work with `EFFECT`, which writes the transactional outbox.
 
 ## Path Parameters
 
@@ -146,5 +176,5 @@ FLOW get_review GET /users/:user_id/reviews/:review_id
 - All bindings must be defined before use (no forward references).
 - Duplicate binding names are rejected.
 - All REQUIRED body/param fields are validated.
-- INSERT/UPDATE/DELETE source operations are validated against source type.
+- INSERT/UPSERT/UPDATE/DELETE/FANOUT source operations are validated against source type.
 - Source operations require matching capabilities in the realm.

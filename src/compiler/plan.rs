@@ -99,10 +99,17 @@ impl Planner {
         for construct in &program.constructs {
             if let Construct::Source(s) = construct {
                 self.source_shapes.insert(s.name.clone(), s.shape.clone());
-                self.source_info.insert(s.name.clone(), SourceInfo {
-                    source_type: s.source_type,
-                    indexes: s.indexes.iter().map(|idx| idx.fields.iter().map(|f| f.name.clone()).collect()).collect(),
-                });
+                self.source_info.insert(
+                    s.name.clone(),
+                    SourceInfo {
+                        source_type: s.source_type,
+                        indexes: s
+                            .indexes
+                            .iter()
+                            .map(|idx| idx.fields.iter().map(|f| f.name.clone()).collect())
+                            .collect(),
+                    },
+                );
             }
         }
 
@@ -228,6 +235,34 @@ impl Planner {
                     }
                     defined_bindings.push(name);
                 }
+                FlowStep::Upsert(upsert) => {
+                    let name = format!("__upsert_{}", upsert.source);
+                    let mut deps = HashSet::new();
+                    for (_, expr) in &upsert.keys {
+                        for r in &self.collect_expr_refs(expr) {
+                            if defined_bindings.contains(r) {
+                                deps.insert(r.clone());
+                            }
+                        }
+                    }
+                    for set in &upsert.sets {
+                        for r in &self.collect_expr_refs(&set.value) {
+                            if defined_bindings.contains(r) {
+                                deps.insert(r.clone());
+                            }
+                        }
+                    }
+                    for b in &defined_bindings {
+                        if b.starts_with("__guard_") || b.starts_with("__rule_") {
+                            deps.insert(b.clone());
+                        }
+                    }
+                    graph.insert(name.clone(), deps);
+                    if let Some(binding) = &upsert.binding {
+                        defined_bindings.push(binding.clone());
+                    }
+                    defined_bindings.push(name);
+                }
                 FlowStep::Update(update) => {
                     let name = format!("__update_{}", update.source);
                     let mut deps = HashSet::new();
@@ -298,12 +333,17 @@ impl Planner {
                                     }
                                 }
                             }
-                            EffectField::Template(_) | EffectField::Event(_) | EffectField::Task(_) => {}
+                            EffectField::Template(_)
+                            | EffectField::Event(_)
+                            | EffectField::Task(_) => {}
                         }
                     }
                     // effects depend on all mutations
                     for b in &defined_bindings {
-                        if b.starts_with("__insert_") || b.starts_with("__update_") || b.starts_with("__delete_") {
+                        if b.starts_with("__insert_")
+                            || b.starts_with("__update_")
+                            || b.starts_with("__delete_")
+                        {
                             deps.insert(b.clone());
                         }
                     }
@@ -339,6 +379,16 @@ impl Planner {
                             deps.insert(r.clone());
                         }
                     }
+                    graph.insert(name.clone(), deps);
+                    defined_bindings.push(name);
+                }
+                FlowStep::Fanout(fanout) => {
+                    let name = format!("__fanout_{}", fanout.insert.source);
+                    let mut deps = self.collect_expr_refs(&fanout.source);
+                    for (_, expr) in &fanout.insert.fields {
+                        deps.extend(self.collect_expr_refs(expr));
+                    }
+                    deps.retain(|r| defined_bindings.contains(r));
                     graph.insert(name.clone(), deps);
                     defined_bindings.push(name);
                 }
@@ -401,7 +451,9 @@ impl Planner {
                 self.walk_expr_refs(b, refs);
                 self.walk_expr_refs(c, refs);
             }
-            Expr::If { cond, then, else_, .. } => {
+            Expr::If {
+                cond, then, else_, ..
+            } => {
                 self.walk_expr_refs(cond, refs);
                 self.walk_expr_refs(then, refs);
                 self.walk_expr_refs(else_, refs);
@@ -411,7 +463,12 @@ impl Planner {
                     self.walk_expr_refs(&f.value, refs);
                 }
             }
-            Expr::Query { filters, cursor, page_size, .. } => {
+            Expr::Query {
+                filters,
+                cursor,
+                page_size,
+                ..
+            } => {
                 for f in filters {
                     self.walk_expr_refs(&f.value, refs);
                 }
@@ -491,7 +548,10 @@ impl Planner {
 
         for step in steps {
             if let FlowStep::Let(let_step) = step {
-                if let Expr::Fetch { source, filters, .. } = &let_step.expr {
+                if let Expr::Fetch {
+                    source, filters, ..
+                } = &let_step.expr
+                {
                     for filter in filters {
                         let refs = self.collect_expr_refs(&filter.value);
                         for r in &refs {
@@ -517,7 +577,10 @@ impl Planner {
 
         for step in steps {
             if let FlowStep::Let(let_step) = step {
-                if let Expr::Query { source, filters, .. } = &let_step.expr {
+                if let Expr::Query {
+                    source, filters, ..
+                } = &let_step.expr
+                {
                     let filter_sig: Vec<(String, String)> = filters
                         .iter()
                         .map(|f| (f.field.clone(), format!("{:?}", f.op)))
@@ -599,6 +662,7 @@ impl Planner {
             FlowStep::Guard(g) => format!("__guard_{}", g.name),
             FlowStep::Rule(r) => format!("__rule_{}", r.name),
             FlowStep::Insert(i) => format!("__insert_{}", i.source),
+            FlowStep::Upsert(u) => format!("__upsert_{}", u.source),
             FlowStep::Update(u) => format!("__update_{}", u.source),
             FlowStep::Delete(d) => format!("__delete_{}", d.source),
             FlowStep::Effect(e) => {
@@ -613,6 +677,7 @@ impl Planner {
             FlowStep::Match(_) => "__match".to_string(),
             FlowStep::Set(s) => s.name.clone(),
             FlowStep::Each(e) => format!("__each_{}", e.binding),
+            FlowStep::Fanout(f) => format!("__fanout_{}", f.insert.source),
             FlowStep::Try(_) => "__try".to_string(),
             FlowStep::Upload(u) => format!("__upload_{}", u.storage),
         }
@@ -623,8 +688,11 @@ impl Planner {
         for step in steps {
             if let FlowStep::Let(let_step) = step {
                 match &let_step.expr {
-                    Expr::Fetch { source, filters, .. } => {
-                        let filter_fields: Vec<&str> = filters.iter().map(|f| f.field.as_str()).collect();
+                    Expr::Fetch {
+                        source, filters, ..
+                    } => {
+                        let filter_fields: Vec<&str> =
+                            filters.iter().map(|f| f.field.as_str()).collect();
                         plans.push(QueryPlan {
                             binding: let_step.name.clone(),
                             source: source.clone(),
@@ -632,8 +700,14 @@ impl Planner {
                             selected_index: self.select_index(source, &filter_fields),
                         });
                     }
-                    Expr::Query { source, filters, sorts, .. } => {
-                        let mut fields: Vec<&str> = filters.iter().map(|f| f.field.as_str()).collect();
+                    Expr::Query {
+                        source,
+                        filters,
+                        sorts,
+                        ..
+                    } => {
+                        let mut fields: Vec<&str> =
+                            filters.iter().map(|f| f.field.as_str()).collect();
                         for sort in sorts {
                             if !fields.contains(&sort.field.as_str()) {
                                 fields.push(&sort.field);
@@ -667,7 +741,8 @@ impl Planner {
         let mut best: Option<(usize, &Vec<String>)> = None;
 
         for index in &info.indexes {
-            let prefix_match = index.iter()
+            let prefix_match = index
+                .iter()
                 .take_while(|f| query_fields.contains(&f.as_str()))
                 .count();
             if prefix_match > 0 && (best.is_none() || prefix_match > best.unwrap().0) {
@@ -685,8 +760,10 @@ impl Planner {
         for step in steps {
             match step {
                 FlowStep::Insert(i) => mutations.push(format!("INSERT {}", i.source)),
+                FlowStep::Upsert(u) => mutations.push(format!("UPSERT {}", u.source)),
                 FlowStep::Update(u) => mutations.push(format!("UPDATE {}", u.source)),
                 FlowStep::Delete(d) => mutations.push(format!("DELETE {}", d.source)),
+                FlowStep::Fanout(f) => mutations.push(format!("FANOUT {}", f.insert.source)),
                 FlowStep::Effect(e) => {
                     let kind = match e.kind {
                         EffectKind::Email => "email",
@@ -889,7 +966,12 @@ FLOW double_query get /orders
   RETURN 200 orders_a
 "#;
         let result = plan_from(input);
-        assert!(result.warnings.iter().any(|w| w.kind == PlanWarningKind::RedundantQuery));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.kind == PlanWarningKind::RedundantQuery)
+        );
     }
 
     #[test]
@@ -1157,25 +1239,34 @@ FLOW restock post /items/:id/restock
         let plan = &result.flow_plans[0];
 
         // The insert should come after the guard
-        let insert_group_idx = plan.execution_groups.iter().position(|g| {
-            g.steps.iter().any(|s| s.starts_with("__insert_"))
-        }).unwrap();
-        let guard_group_idx = plan.execution_groups.iter().position(|g| {
-            g.steps.iter().any(|s| s.starts_with("__guard_"))
-        }).unwrap();
+        let insert_group_idx = plan
+            .execution_groups
+            .iter()
+            .position(|g| g.steps.iter().any(|s| s.starts_with("__insert_")))
+            .unwrap();
+        let guard_group_idx = plan
+            .execution_groups
+            .iter()
+            .position(|g| g.steps.iter().any(|s| s.starts_with("__guard_")))
+            .unwrap();
         assert!(guard_group_idx < insert_group_idx);
     }
 
     #[test]
     fn test_booking_flow_plan() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
+        )
+        .unwrap();
         let result = plan_from(&input);
         assert!(result.warnings.is_empty());
         assert_eq!(result.flow_plans.len(), 3);
 
-        let create = result.flow_plans.iter().find(|p| p.name == "create_booking").unwrap();
+        let create = result
+            .flow_plans
+            .iter()
+            .find(|p| p.name == "create_booking")
+            .unwrap();
         assert!(create.transaction.is_some());
         let txn = create.transaction.as_ref().unwrap();
         assert_eq!(txn.mutations.len(), 1);

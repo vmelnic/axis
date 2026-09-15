@@ -60,8 +60,11 @@ pub enum TokenKind {
     Fetch,
     Query,
     Insert,
+    Upsert,
     Update,
     Delete,
+    Fanout,
+    Idempotency,
     Call,
     Effect,
     Match,
@@ -183,6 +186,7 @@ pub enum TokenKind {
     Reads,
     Method,
     Where,
+    Key,
     Set,
     Copy,
     Compute,
@@ -222,6 +226,7 @@ pub enum TokenKind {
     Output,
     Timeout,
     Retry,
+    Pure,
     Backoff,
     Ttl,
     Vary,
@@ -253,9 +258,9 @@ pub enum TokenKind {
     Years,
 
     // Symbols
-    Arrow,   // ->
-    Dot,     // .
-    Colon,   // :
+    Arrow, // ->
+    Dot,   // .
+    Colon, // :
 
     // Special
     Eof,
@@ -290,8 +295,11 @@ impl TokenKind {
             TokenKind::Fetch => Some("FETCH"),
             TokenKind::Query => Some("QUERY"),
             TokenKind::Insert => Some("INSERT"),
+            TokenKind::Upsert => Some("UPSERT"),
             TokenKind::Update => Some("UPDATE"),
             TokenKind::Delete => Some("DELETE"),
+            TokenKind::Fanout => Some("FANOUT"),
+            TokenKind::Idempotency => Some("IDEMPOTENCY"),
             TokenKind::Call => Some("CALL"),
             TokenKind::Effect => Some("EFFECT"),
             TokenKind::Match => Some("MATCH"),
@@ -401,6 +409,7 @@ impl TokenKind {
             TokenKind::Reads => Some("READS"),
             TokenKind::Method => Some("METHOD"),
             TokenKind::Where => Some("WHERE"),
+            TokenKind::Key => Some("KEY"),
             TokenKind::Set => Some("SET"),
             TokenKind::Copy => Some("COPY"),
             TokenKind::Compute => Some("COMPUTE"),
@@ -419,6 +428,7 @@ impl TokenKind {
             TokenKind::Output => Some("OUTPUT"),
             TokenKind::Timeout => Some("TIMEOUT"),
             TokenKind::Retry => Some("RETRY"),
+            TokenKind::Pure => Some("PURE"),
             TokenKind::Backoff => Some("BACKOFF"),
             TokenKind::Ttl => Some("TTL"),
             TokenKind::Vary => Some("VARY"),

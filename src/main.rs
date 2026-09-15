@@ -5,7 +5,9 @@ fn main() {
 
     let mut file_args = Vec::new();
     let mut mode = Mode::Check;
-    let mut named_args: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut project_mode = false;
+    let mut named_args: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
 
     let mut i = 1;
     while i < args.len() {
@@ -25,7 +27,7 @@ fn main() {
             "--constrain" => mode = Mode::Constrain,
             "--logit-masks" => mode = Mode::LogitMasks,
             "--ts" => mode = Mode::Typescript,
-            "--project" => mode = Mode::Project,
+            "--project" => project_mode = true,
             "--diff" => mode = Mode::Diff,
             "--completions" => mode = Mode::Completions,
             "--lsp" => mode = Mode::Lsp,
@@ -50,7 +52,9 @@ fn main() {
                     i += 1;
                 } else {
                     eprintln!("unknown flag: {s}");
-                    eprintln!("usage: axis [--fmt|--sql|--routes|--emit|--plan|--link|--rust|--serve|--project|--lsp|--watch|--migrate] <file|dir>");
+                    eprintln!(
+                        "usage: axis [--fmt|--sql|--routes|--emit|--plan|--link|--rust|--serve|--project|--lsp|--watch|--migrate] <file|dir>"
+                    );
                     std::process::exit(1);
                 }
             }
@@ -96,22 +100,35 @@ fn main() {
 
     if matches!(mode, Mode::Serve) {
         let dir = file_arg.clone().unwrap_or_else(|| ".".to_string());
-        let port: u16 = named_args.get("port")
+        let port: u16 = named_args
+            .get("port")
             .and_then(|p| p.parse().ok())
             .or_else(|| std::env::var("PORT").ok().and_then(|p| p.parse().ok()))
             .unwrap_or(3000);
         let opts = axis::serve::ServeOpts {
-            src_dir: named_args.get("src").cloned()
+            src_dir: named_args
+                .get("src")
+                .cloned()
                 .or_else(|| std::env::var("AXIS_SRC_DIR").ok()),
-            adapters_dir: named_args.get("adapters").cloned()
+            adapters_dir: named_args
+                .get("adapters")
+                .cloned()
                 .or_else(|| std::env::var("AXIS_ADAPTERS_DIR").ok()),
-            templates_dir: named_args.get("templates").cloned()
+            templates_dir: named_args
+                .get("templates")
+                .cloned()
                 .or_else(|| std::env::var("AXIS_TEMPLATES_DIR").ok()),
-            locales_dir: named_args.get("locales").cloned()
+            locales_dir: named_args
+                .get("locales")
+                .cloned()
                 .or_else(|| std::env::var("AXIS_LOCALES_DIR").ok()),
-            db_url: named_args.get("db").cloned()
+            db_url: named_args
+                .get("db")
+                .cloned()
                 .or_else(|| std::env::var("DATABASE_URL").ok()),
-            jwt_secret: named_args.get("jwt-secret").cloned()
+            jwt_secret: named_args
+                .get("jwt-secret")
+                .cloned()
                 .or_else(|| std::env::var("JWT_SECRET").ok()),
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -126,40 +143,40 @@ fn main() {
         return;
     }
 
-    if matches!(mode, Mode::Project) {
-        let dir = file_arg.unwrap_or_else(|| ".".to_string());
+    let project_program = if project_mode {
+        let dir = file_arg.clone().unwrap_or_else(|| ".".to_string());
         let dir_path = std::path::Path::new(&dir);
-        let compile_dir_buf = named_args.get("src")
+        let compile_dir_buf = named_args
+            .get("src")
             .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var("AXIS_SRC_DIR").ok().map(std::path::PathBuf::from))
+            .or_else(|| {
+                std::env::var("AXIS_SRC_DIR")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            })
             .unwrap_or_else(|| {
                 let src = dir_path.join("src");
-                if src.exists() { src } else { dir_path.to_path_buf() }
+                if src.exists() {
+                    src
+                } else {
+                    dir_path.to_path_buf()
+                }
             });
         let result = axis::project::compile_project(&compile_dir_buf);
         for e in &result.errors {
             eprintln!("ERROR [{}]: {}", e.file.display(), e.error);
         }
-        if result.is_ok() {
-            let verifier = axis::verify::Verifier::new();
-            let verify_result = verifier.verify(&result.program);
-            for e in &verify_result.errors {
-                eprintln!("ERROR: {e}");
-            }
-            for w in &verify_result.warnings {
-                eprintln!("WARN: {w}");
-            }
-            println!("OK: {} files, {} constructs",
-                result.files.len(),
-                result.program.constructs.len());
-            for f in &result.files {
-                println!("  {} ({} constructs)", f.path.display(), f.construct_count);
-            }
-        } else {
+        if !result.is_ok() {
             std::process::exit(1);
         }
-        return;
-    }
+        if matches!(mode, Mode::Format) {
+            eprintln!("--fmt cannot rewrite a multi-file project; format individual .axis files");
+            std::process::exit(1);
+        }
+        Some(result.program)
+    } else {
+        None
+    };
 
     if matches!(mode, Mode::Diff) {
         if file_args.len() != 2 {
@@ -199,10 +216,12 @@ fn main() {
             })
         } else {
             let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf).unwrap_or_else(|e| {
-                eprintln!("error: cannot read stdin: {e}");
-                std::process::exit(1);
-            });
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .unwrap_or_else(|e| {
+                    eprintln!("error: cannot read stdin: {e}");
+                    std::process::exit(1);
+                });
             buf
         };
         let result = axis::incremental::validate_partial(&input);
@@ -216,37 +235,34 @@ fn main() {
         return;
     }
 
-    let input = if let Some(path) = file_arg {
-        std::fs::read_to_string(&path).unwrap_or_else(|e| {
-            eprintln!("error: cannot read {}: {e}", path);
-            std::process::exit(1);
-        })
-    } else {
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).unwrap_or_else(|e| {
-            eprintln!("error: cannot read stdin: {e}");
+    let program = project_program.unwrap_or_else(|| {
+        let input = if let Some(path) = file_arg {
+            std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                eprintln!("error: cannot read {}: {e}", path);
+                std::process::exit(1);
+            })
+        } else {
+            let mut buf = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .unwrap_or_else(|e| {
+                    eprintln!("error: cannot read stdin: {e}");
+                    std::process::exit(1);
+                });
+            buf
+        };
+
+        let mut lexer = axis::lexer::Lexer::new(&input);
+        let tokens = lexer.tokenize().unwrap_or_else(|e| {
+            eprintln!("{e}");
             std::process::exit(1);
         });
-        buf
-    };
-
-    let mut lexer = axis::lexer::Lexer::new(&input);
-    let tokens = match lexer.tokenize() {
-        Ok(t) => t,
-        Err(e) => {
+        let mut parser = axis::parser::Parser::new(tokens);
+        parser.parse_program().unwrap_or_else(|e| {
             eprintln!("{e}");
             std::process::exit(1);
-        }
-    };
-
-    let mut parser = axis::parser::Parser::new(tokens);
-    let program = match parser.parse_program() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
+        })
+    });
 
     if matches!(mode, Mode::Format) {
         print!("{}", axis::fmt::format_program(&program));
@@ -263,20 +279,51 @@ fn main() {
         eprintln!("WARN: {w}");
     }
 
-    let shapes = program.constructs.iter().filter(|c| matches!(c, axis::ast::Construct::Shape(_))).count();
-    let sources = program.constructs.iter().filter(|c| matches!(c, axis::ast::Construct::Source(_))).count();
-    let realms = program.constructs.iter().filter(|c| matches!(c, axis::ast::Construct::Realm(_))).count();
-    let flows = program.constructs.iter().filter(|c| matches!(c, axis::ast::Construct::Flow(_))).count();
-    let streams = program.constructs.iter().filter(|c| matches!(c, axis::ast::Construct::Stream(_))).count();
+    let shapes = program
+        .constructs
+        .iter()
+        .filter(|c| matches!(c, axis::ast::Construct::Shape(_)))
+        .count();
+    let sources = program
+        .constructs
+        .iter()
+        .filter(|c| matches!(c, axis::ast::Construct::Source(_)))
+        .count();
+    let realms = program
+        .constructs
+        .iter()
+        .filter(|c| matches!(c, axis::ast::Construct::Realm(_)))
+        .count();
+    let flows = program
+        .constructs
+        .iter()
+        .filter(|c| matches!(c, axis::ast::Construct::Flow(_)))
+        .count();
+    let streams = program
+        .constructs
+        .iter()
+        .filter(|c| matches!(c, axis::ast::Construct::Stream(_)))
+        .count();
 
     if result.error_count() > 0 {
-        eprintln!("{} shapes, {} sources, {} realms, {} flows, {} streams — {} errors", shapes, sources, realms, flows, streams, result.error_count());
+        eprintln!(
+            "{} shapes, {} sources, {} realms, {} flows, {} streams — {} errors",
+            shapes,
+            sources,
+            realms,
+            flows,
+            streams,
+            result.error_count()
+        );
         std::process::exit(1);
     }
 
     match mode {
         Mode::Check => {
-            println!("OK: {} shapes, {} sources, {} realms, {} flows, {} streams — verified", shapes, sources, realms, flows, streams);
+            println!(
+                "OK: {} shapes, {} sources, {} realms, {} flows, {} streams — verified",
+                shapes, sources, realms, flows, streams
+            );
         }
         Mode::Sql => {
             let codegen = axis::codegens::sql::generate(&program);
@@ -318,7 +365,11 @@ fn main() {
                 for s in &codegen.streams {
                     println!("{} {} {}", s.transport, s.path, s.name);
                     for evt in &s.events {
-                        let fields: Vec<String> = evt.fields.iter().map(|(n, t)| format!("{n}: {t}")).collect();
+                        let fields: Vec<String> = evt
+                            .fields
+                            .iter()
+                            .map(|(n, t)| format!("{n}: {t}"))
+                            .collect();
                         println!("  EVENT {} [{}]", evt.name, fields.join(", "));
                     }
                 }
@@ -336,18 +387,29 @@ fn main() {
             for fp in &plan_result.flow_plans {
                 println!("FLOW {}", fp.name);
                 for (i, group) in fp.execution_groups.iter().enumerate() {
-                    let mode = if group.parallel { "parallel" } else { "sequential" };
+                    let mode = if group.parallel {
+                        "parallel"
+                    } else {
+                        "sequential"
+                    };
                     println!("  group {i}: [{mode}] {}", group.steps.join(", "));
                 }
                 if let Some(txn) = &fp.transaction {
-                    println!("  transaction: {} mutations, {} outbox effects",
-                        txn.mutations.len(), txn.outbox_effects.len());
+                    println!(
+                        "  transaction: {} mutations, {} outbox effects",
+                        txn.mutations.len(),
+                        txn.outbox_effects.len()
+                    );
                 }
             }
             for sp in &plan_result.saga_plans {
                 println!("SAGA {}", sp.name);
                 for st in &sp.step_transactions {
-                    let comp = if st.has_compensate { "with compensate" } else { "no compensate" };
+                    let comp = if st.has_compensate {
+                        "with compensate"
+                    } else {
+                        "no compensate"
+                    };
                     println!("  step {}: {comp}", st.step_name);
                 }
             }
@@ -416,7 +478,10 @@ fn main() {
         Mode::Observability => {
             let schema = axis::observability::generate_observability(&program);
             println!("{}", serde_json::to_string_pretty(&schema).unwrap());
-            println!("\n{}", axis::observability::export_prometheus_config(&schema));
+            println!(
+                "\n{}",
+                axis::observability::export_prometheus_config(&schema)
+            );
         }
         Mode::ClientTs => {
             let client = axis::codegens::client::generate_client(&program);
@@ -452,7 +517,10 @@ fn main() {
                     print!("{content}");
                     println!();
                 }
-                println!("{}", serde_json::to_string_pretty(&plan.migrations).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&plan.migrations).unwrap()
+                );
             }
         }
         Mode::MigrateRunner => {
@@ -463,12 +531,20 @@ fn main() {
             println!("// === src/main.rs ===");
             print!("{}", runner.main_rs);
         }
-        Mode::Format | Mode::Constrain | Mode::LogitMasks | Mode::Project | Mode::Diff | Mode::Completions | Mode::Lsp | Mode::Watch | Mode::Serve => unreachable!(),
+        Mode::Format
+        | Mode::Constrain
+        | Mode::LogitMasks
+        | Mode::Diff
+        | Mode::Completions
+        | Mode::Lsp
+        | Mode::Watch
+        | Mode::Serve => unreachable!(),
     }
 }
 
 fn print_help() {
-    println!(r#"axis — backend programming language
+    println!(
+        r#"axis — backend programming language
 
 USAGE:
     axis [MODE] [OPTIONS] <file|dir>
@@ -480,7 +556,7 @@ MODES:
     --sql             Generate SQL DDL
     --fmt             Format source
     --routes          List routes
-    --openapi         Generate OpenAPI 3.0 spec
+    --openapi         Generate OpenAPI 3.1 spec
     --ts              Generate TypeScript types
     --rust            Generate Rust/axum server
     --graphql         Generate GraphQL schema
@@ -526,7 +602,8 @@ EXAMPLES:
     axis --serve myapp/                   Serve on port 3000
     axis --serve --port 8080 myapp/       Serve on port 8080
     axis --project --sql myapp/           Generate DDL
-"#);
+"#
+    );
 }
 
 enum Mode {
@@ -540,7 +617,6 @@ enum Mode {
     Link,
     Constrain,
     Typescript,
-    Project,
     Diff,
     Completions,
     Lsp,

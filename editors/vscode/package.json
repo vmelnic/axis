@@ -2,7 +2,7 @@
   "name": "axis-lang",
   "displayName": "Axis Language",
   "description": "Language support for Axis — a backend API language for small LLMs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "axis",
   "icon": "icon.png",
   "license": "MIT",

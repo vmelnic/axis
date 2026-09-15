@@ -77,7 +77,9 @@ pub fn compile_project(dir: &Path) -> ProjectResult {
     }
 
     ProjectResult {
-        program: Program { constructs: all_constructs },
+        program: Program {
+            constructs: all_constructs,
+        },
         files,
         errors,
     }
@@ -119,7 +121,9 @@ pub fn compile_files(paths: &[PathBuf]) -> ProjectResult {
     }
 
     ProjectResult {
-        program: Program { constructs: all_constructs },
+        program: Program {
+            constructs: all_constructs,
+        },
         files,
         errors,
     }
@@ -154,9 +158,7 @@ mod tests {
 
     #[test]
     fn test_compile_single_file() {
-        let paths = vec![
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
-        ];
+        let paths = vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")];
         let result = compile_files(&paths);
         assert!(result.is_ok());
         assert_eq!(result.files.len(), 1);
@@ -186,21 +188,31 @@ mod tests {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
         let result = compile_project(&dir);
         assert!(result.is_ok());
-        assert_eq!(result.files.len(), 2);
+        assert_eq!(result.files.len(), 4);
     }
 
     #[test]
     fn test_compile_split_files() {
         let tmp = tempdir();
-        fs::write(tmp.join("shapes.axis"), r#"SHAPE User
+        fs::write(
+            tmp.join("shapes.axis"),
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
-"#).unwrap();
-        fs::write(tmp.join("sources.axis"), r#"SOURCE users POSTGRES
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("sources.axis"),
+            r#"SOURCE users POSTGRES
   SHAPE User
   INDEX id
-"#).unwrap();
-        fs::write(tmp.join("flows.axis"), r#"REALM api
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("flows.axis"),
+            r#"REALM api
   CAPABILITY read users
 
 FLOW get_user get /users/:id
@@ -211,18 +223,36 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = compile_project(&tmp);
-        assert!(result.is_ok(), "errors: {:?}", result.errors.iter().map(|e| &e.error).collect::<Vec<_>>());
+        assert!(
+            result.is_ok(),
+            "errors: {:?}",
+            result.errors.iter().map(|e| &e.error).collect::<Vec<_>>()
+        );
         assert_eq!(result.files.len(), 3);
 
-        let shapes = result.program.constructs.iter()
-            .filter(|c| matches!(c, crate::ast::Construct::Shape(_))).count();
-        let sources = result.program.constructs.iter()
-            .filter(|c| matches!(c, crate::ast::Construct::Source(_))).count();
-        let flows = result.program.constructs.iter()
-            .filter(|c| matches!(c, crate::ast::Construct::Flow(_))).count();
+        let shapes = result
+            .program
+            .constructs
+            .iter()
+            .filter(|c| matches!(c, crate::ast::Construct::Shape(_)))
+            .count();
+        let sources = result
+            .program
+            .constructs
+            .iter()
+            .filter(|c| matches!(c, crate::ast::Construct::Source(_)))
+            .count();
+        let flows = result
+            .program
+            .constructs
+            .iter()
+            .filter(|c| matches!(c, crate::ast::Construct::Flow(_)))
+            .count();
         assert_eq!(shapes, 1);
         assert_eq!(sources, 1);
         assert_eq!(flows, 1);
@@ -261,18 +291,32 @@ FLOW get_user get /users/:id
     #[test]
     fn test_split_project_verifies() {
         let tmp = tempdir();
-        fs::write(tmp.join("shapes.axis"), r#"SHAPE User
+        fs::write(
+            tmp.join("shapes.axis"),
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
-"#).unwrap();
-        fs::write(tmp.join("sources.axis"), r#"SOURCE users POSTGRES
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("sources.axis"),
+            r#"SOURCE users POSTGRES
   SHAPE User
   INDEX id
-"#).unwrap();
-        fs::write(tmp.join("realms.axis"), r#"REALM api
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("realms.axis"),
+            r#"REALM api
   CAPABILITY read users
-"#).unwrap();
-        fs::write(tmp.join("flows.axis"), r#"FLOW get_user get /users/:id
+"#,
+        )
+        .unwrap();
+        fs::write(
+            tmp.join("flows.axis"),
+            r#"FLOW get_user get /users/:id
   REALM api
   AUTH session
   LET user
@@ -280,15 +324,24 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let result = compile_project(&tmp);
         assert!(result.is_ok());
 
         let verifier = crate::verify::Verifier::new();
         let verify_result = verifier.verify(&result.program);
-        assert!(verify_result.is_ok(), "verify errors: {:?}",
-            verify_result.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>());
+        assert!(
+            verify_result.is_ok(),
+            "verify errors: {:?}",
+            verify_result
+                .errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 
     fn tempdir() -> PathBuf {

@@ -37,7 +37,9 @@ pub struct SourceConfig {
     pub statement_timeout: Option<String>,
 }
 
-fn default_pool_size() -> u32 { 10 }
+fn default_pool_size() -> u32 {
+    10
+}
 
 #[derive(Debug, Deserialize)]
 pub struct ServiceConfig {
@@ -103,7 +105,9 @@ pub struct ServerConfig {
     pub cors: Option<CorsConfig>,
 }
 
-fn default_port() -> u16 { 8080 }
+fn default_port() -> u16 {
+    8080
+}
 
 #[derive(Debug, Deserialize)]
 pub struct CorsConfig {
@@ -129,28 +133,44 @@ impl std::fmt::Display for ConfigError {
 }
 
 pub fn load_config(path: &Path) -> Result<AxisConfig, ConfigError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| ConfigError { message: format!("cannot read {}: {e}", path.display()) })?;
+    let content = std::fs::read_to_string(path).map_err(|e| ConfigError {
+        message: format!("cannot read {}: {e}", path.display()),
+    })?;
     parse_config(&content)
 }
 
 pub fn parse_config(content: &str) -> Result<AxisConfig, ConfigError> {
-    let config: AxisConfig = serde_yaml::from_str(content)
-        .map_err(|e| ConfigError { message: format!("invalid config: {e}") })?;
+    let config: AxisConfig = serde_yaml::from_str(content).map_err(|e| ConfigError {
+        message: format!("invalid config: {e}"),
+    })?;
     validate_config(&config)?;
     Ok(config)
 }
 
 fn validate_config(config: &AxisConfig) -> Result<(), ConfigError> {
     if config.axis.version.is_empty() {
-        return Err(ConfigError { message: "axis.version is required".into() });
+        return Err(ConfigError {
+            message: "axis.version is required".into(),
+        });
     }
 
-    let valid_types = ["postgres", "mysql", "sqlite", "redis", "elasticsearch", "dynamodb"];
+    let valid_types = [
+        "postgres",
+        "mysql",
+        "sqlite",
+        "redis",
+        "elasticsearch",
+        "dynamodb",
+    ];
     for (name, source) in &config.sources {
         if !valid_types.contains(&source.source_type.as_str()) {
             return Err(ConfigError {
-                message: format!("source '{}': unknown type '{}', expected one of: {}", name, source.source_type, valid_types.join(", ")),
+                message: format!(
+                    "source '{}': unknown type '{}', expected one of: {}",
+                    name,
+                    source.source_type,
+                    valid_types.join(", ")
+                ),
             });
         }
         if source.pool_size == 0 {
@@ -164,7 +184,11 @@ fn validate_config(config: &AxisConfig) -> Result<(), ConfigError> {
         let valid_providers = ["env", "aws_secrets_manager", "hashicorp_vault"];
         if !valid_providers.contains(&vault.provider.as_str()) {
             return Err(ConfigError {
-                message: format!("vault: unknown provider '{}', expected one of: {}", vault.provider, valid_providers.join(", ")),
+                message: format!(
+                    "vault: unknown provider '{}', expected one of: {}",
+                    vault.provider,
+                    valid_providers.join(", ")
+                ),
             });
         }
     }
@@ -174,7 +198,11 @@ fn validate_config(config: &AxisConfig) -> Result<(), ConfigError> {
             let valid_auth_types = ["jwt", "opaque"];
             if !valid_auth_types.contains(&session.auth_type.as_str()) {
                 return Err(ConfigError {
-                    message: format!("auth.session: unknown type '{}', expected one of: {}", session.auth_type, valid_auth_types.join(", ")),
+                    message: format!(
+                        "auth.session: unknown type '{}', expected one of: {}",
+                        session.auth_type,
+                        valid_auth_types.join(", ")
+                    ),
                 });
             }
         }
@@ -182,14 +210,19 @@ fn validate_config(config: &AxisConfig) -> Result<(), ConfigError> {
 
     if let Some(ref server) = config.server {
         if server.port == 0 {
-            return Err(ConfigError { message: "server.port must be > 0".into() });
+            return Err(ConfigError {
+                message: "server.port must be > 0".into(),
+            });
         }
     }
 
     Ok(())
 }
 
-pub fn validate_config_against_program(config: &AxisConfig, program: &crate::ast::Program) -> Vec<ConfigError> {
+pub fn validate_config_against_program(
+    config: &AxisConfig,
+    program: &crate::ast::Program,
+) -> Vec<ConfigError> {
     use crate::ast::Construct;
     let mut errors = Vec::new();
 
@@ -197,26 +230,36 @@ pub fn validate_config_against_program(config: &AxisConfig, program: &crate::ast
         if let Construct::Source(source) = construct {
             if !config.sources.contains_key(&source.name) {
                 errors.push(ConfigError {
-                    message: format!("SOURCE '{}' declared in program but not configured in axis.yaml", source.name),
+                    message: format!(
+                        "SOURCE '{}' declared in program but not configured in axis.yaml",
+                        source.name
+                    ),
                 });
             }
         }
         if let Construct::Service(service) = construct {
             if !config.services.contains_key(&service.name) {
                 errors.push(ConfigError {
-                    message: format!("SERVICE '{}' declared in program but not configured in axis.yaml", service.name),
+                    message: format!(
+                        "SERVICE '{}' declared in program but not configured in axis.yaml",
+                        service.name
+                    ),
                 });
             }
         }
     }
 
     for (name, source_cfg) in &config.sources {
-        let has_source = program.constructs.iter().any(|c| {
-            matches!(c, Construct::Source(s) if s.name == *name)
-        });
+        let has_source = program
+            .constructs
+            .iter()
+            .any(|c| matches!(c, Construct::Source(s) if s.name == *name));
         if !has_source {
             errors.push(ConfigError {
-                message: format!("source '{}' configured in axis.yaml but not declared as SOURCE in program", name),
+                message: format!(
+                    "source '{}' configured in axis.yaml but not declared as SOURCE in program",
+                    name
+                ),
             });
         }
         let expected_type = program.constructs.iter().find_map(|c| {
@@ -230,7 +273,10 @@ pub fn validate_config_against_program(config: &AxisConfig, program: &crate::ast
         if let Some(expected) = expected_type {
             if source_cfg.source_type != expected {
                 errors.push(ConfigError {
-                    message: format!("source '{}': config type '{}' does not match SOURCE type '{}'", name, source_cfg.source_type, expected),
+                    message: format!(
+                        "source '{}': config type '{}' does not match SOURCE type '{}'",
+                        name, source_cfg.source_type, expected
+                    ),
                 });
             }
         }
@@ -366,16 +412,19 @@ axis:
 "#;
         let config = parse_config(yaml).unwrap();
         let program = crate::ast::Program {
-            constructs: vec![
-                crate::ast::Construct::Source(crate::ast::SourceDef {
-                    name: "users".into(),
-                    source_type: crate::ast::SourceType::Postgres,
-                    shape: "User".into(),
-                    indexes: vec![],
-                    ttl: None,
-                    span: crate::token::Span { offset: 0, len: 0, line: 1, col: 1 },
-                }),
-            ],
+            constructs: vec![crate::ast::Construct::Source(crate::ast::SourceDef {
+                name: "users".into(),
+                source_type: crate::ast::SourceType::Postgres,
+                shape: "User".into(),
+                indexes: vec![],
+                ttl: None,
+                span: crate::token::Span {
+                    offset: 0,
+                    len: 0,
+                    line: 1,
+                    col: 1,
+                },
+            })],
         };
         let errors = validate_config_against_program(&config, &program);
         assert_eq!(errors.len(), 1);

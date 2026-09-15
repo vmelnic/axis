@@ -55,7 +55,7 @@ Capability declarations whitelist what operations flows in this realm can perfor
 
 ```axis
 CAPABILITY read users          -- allows FETCH/QUERY on users source
-CAPABILITY write bookings      -- allows INSERT/UPDATE/DELETE on bookings source
+CAPABILITY write bookings      -- allows INSERT/UPSERT/UPDATE/DELETE/FANOUT on bookings source
 CAPABILITY call payments       -- allows CALL payments.* methods
 CAPABILITY effect email        -- allows EFFECT email
 CAPABILITY admin users         -- allows SCOPE TENANT ANY on users source
@@ -65,7 +65,7 @@ CAPABILITY admin users         -- allows SCOPE TENANT ANY on users source
 
 - Realm names must not conflict.
 - Every FETCH/QUERY on source S in a flow requires `CAPABILITY read S` in the flow's realm.
-- Every INSERT/UPDATE/DELETE on source S requires `CAPABILITY write S`.
+- Every INSERT/UPSERT/UPDATE/DELETE/FANOUT on source S requires `CAPABILITY write S`.
 - Every CALL to service S requires `CAPABILITY call S`.
 - Every EFFECT of type T requires `CAPABILITY effect T`.
 - `SCOPE TENANT ANY` requires `CAPABILITY admin` in the realm.

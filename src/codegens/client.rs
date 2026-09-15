@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
-use crate::ast::*;
 use super::sql as codegen;
+use crate::ast::*;
 
 pub struct ClientOutput {
     pub typescript: String,
@@ -42,7 +42,10 @@ fn gen_ts_client(program: &Program, codegen_result: &codegen::CodegenResult) -> 
                 writeln!(out, "export interface {}Input {{", pascal(&flow.name)).unwrap();
                 for field in &body.fields {
                     let ty = ts_type(&field.ty);
-                    let required = field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+                    let required = field
+                        .modifiers
+                        .iter()
+                        .any(|m| matches!(m, Modifier::Required));
                     let opt = if required { "" } else { "?" };
                     writeln!(out, "  {}{}: {};", field.name, opt, ty).unwrap();
                 }
@@ -62,20 +65,40 @@ fn gen_ts_client(program: &Program, codegen_result: &codegen::CodegenResult) -> 
     writeln!(out, "  private baseUrl: string;").unwrap();
     writeln!(out, "  private headers: Record<string, string>;").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "  constructor(baseUrl: string, headers: Record<string, string> = {{}}) {{").unwrap();
+    writeln!(
+        out,
+        "  constructor(baseUrl: string, headers: Record<string, string> = {{}}) {{"
+    )
+    .unwrap();
     writeln!(out, "    this.baseUrl = baseUrl.replace(/\\/$/, '');").unwrap();
-    writeln!(out, "    this.headers = {{ 'Content-Type': 'application/json', ...headers }};").unwrap();
+    writeln!(
+        out,
+        "    this.headers = {{ 'Content-Type': 'application/json', ...headers }};"
+    )
+    .unwrap();
     writeln!(out, "  }}").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {{").unwrap();
-    writeln!(out, "    const res = await fetch(`${{this.baseUrl}}${{path}}`, {{").unwrap();
+    writeln!(out, "  private async request<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {{}}): Promise<T> {{").unwrap();
+    writeln!(
+        out,
+        "    const res = await fetch(`${{this.baseUrl}}${{path}}`, {{"
+    )
+    .unwrap();
     writeln!(out, "      method,").unwrap();
-    writeln!(out, "      headers: this.headers,").unwrap();
+    writeln!(out, "      headers: {{ ...this.headers, ...headers }},").unwrap();
     writeln!(out, "      body: body ? JSON.stringify(body) : undefined,").unwrap();
     writeln!(out, "    }});").unwrap();
     writeln!(out, "    if (!res.ok) {{").unwrap();
-    writeln!(out, "      const err = await res.json().catch(() => ({{ error: res.statusText }}));").unwrap();
-    writeln!(out, "      throw {{ ...err, status: res.status }} as ApiError;").unwrap();
+    writeln!(
+        out,
+        "      const err = await res.json().catch(() => ({{ error: res.statusText }}));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "      throw {{ ...err, status: res.status }} as ApiError;"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "    return res.json();").unwrap();
     writeln!(out, "  }}").unwrap();
@@ -91,13 +114,22 @@ fn gen_ts_client(program: &Program, codegen_result: &codegen::CodegenResult) -> 
         });
         let Some(flow) = flow else { continue };
 
-        let return_type = flow.return_stmt.body.as_ref().map(|b| match b {
-            ReturnBody::Binding(name) => infer_return_type(name, flow, program),
-            ReturnBody::Inline(_) => "any".to_string(),
-            ReturnBody::Paginated { .. } => "{ items: any[]; total: number; cursor: string; has_more: boolean }".to_string(),
-        }).unwrap_or_else(|| "void".to_string());
+        let return_type = flow
+            .return_stmt
+            .body
+            .as_ref()
+            .map(|b| match b {
+                ReturnBody::Binding(name) => infer_return_type(name, flow, program),
+                ReturnBody::Inline(_) => "any".to_string(),
+                ReturnBody::Paginated { .. } => {
+                    "{ items: any[]; total: number; cursor: string; has_more: boolean }".to_string()
+                }
+            })
+            .unwrap_or_else(|| "void".to_string());
 
-        let path_params: Vec<&str> = flow.path.split('/')
+        let path_params: Vec<&str> = flow
+            .path
+            .split('/')
             .filter(|s| s.starts_with(':'))
             .map(|s| s.trim_start_matches(':'))
             .collect();
@@ -113,20 +145,51 @@ fn gen_ts_client(program: &Program, codegen_result: &codegen::CodegenResult) -> 
         if let Some(ref it) = input_type {
             params.push(format!("body: {it}"));
         }
+        if flow.idempotency.is_some() {
+            params.push("idempotencyKey: string".into());
+        }
 
         let method_name = camel(&flow.name);
-        writeln!(out, "  async {method_name}({}): Promise<{return_type}> {{", params.join(", ")).unwrap();
+        writeln!(
+            out,
+            "  async {method_name}({}): Promise<{return_type}> {{",
+            params.join(", ")
+        )
+        .unwrap();
 
-        let path_str = flow.path.split('/').map(|seg| {
-            if let Some(name) = seg.strip_prefix(':') {
-                format!("${{{name}}}")
-            } else {
-                seg.to_string()
-            }
-        }).collect::<Vec<_>>().join("/");
+        let path_str = flow
+            .path
+            .split('/')
+            .map(|seg| {
+                if let Some(name) = seg.strip_prefix(':') {
+                    format!("${{{name}}}")
+                } else {
+                    seg.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
 
         let body_arg = if has_body { "body" } else { "undefined" };
-        writeln!(out, "    return this.request<{return_type}>('{}', `{path_str}`, {body_arg});", route.method).unwrap();
+        let header_arg = flow
+            .idempotency
+            .as_ref()
+            .map(|declaration| {
+                let header = declaration
+                    .key
+                    .segments
+                    .get(1)
+                    .map(|name| name.replace('_', "-"))
+                    .unwrap_or_else(|| "idempotency-key".into());
+                format!(", {{ '{header}': idempotencyKey }}")
+            })
+            .unwrap_or_default();
+        writeln!(
+            out,
+            "    return this.request<{return_type}>('{}', `{path_str}`, {body_arg}{header_arg});",
+            route.method
+        )
+        .unwrap();
         writeln!(out, "  }}").unwrap();
         writeln!(out).unwrap();
     }
@@ -181,7 +244,11 @@ fn gen_rust_client(program: &Program, codegen_result: &codegen::CodegenResult) -
     writeln!(out, "impl AxisClient {{").unwrap();
     writeln!(out, "    pub fn new(base_url: &str) -> Self {{").unwrap();
     writeln!(out, "        Self {{").unwrap();
-    writeln!(out, "            base_url: base_url.trim_end_matches('/').to_string(),").unwrap();
+    writeln!(
+        out,
+        "            base_url: base_url.trim_end_matches('/').to_string(),"
+    )
+    .unwrap();
     writeln!(out, "            client: reqwest::Client::new(),").unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "    }}").unwrap();
@@ -197,12 +264,21 @@ fn gen_rust_client(program: &Program, codegen_result: &codegen::CodegenResult) -
         });
         let Some(flow) = flow else { continue };
 
-        let return_type = flow.return_stmt.body.as_ref().map(|b| match b {
-            ReturnBody::Binding(name) => infer_rust_return_type(name, flow, program),
-            ReturnBody::Inline(_) | ReturnBody::Paginated { .. } => "serde_json::Value".to_string(),
-        }).unwrap_or_else(|| "()".to_string());
+        let return_type = flow
+            .return_stmt
+            .body
+            .as_ref()
+            .map(|b| match b {
+                ReturnBody::Binding(name) => infer_rust_return_type(name, flow, program),
+                ReturnBody::Inline(_) | ReturnBody::Paginated { .. } => {
+                    "serde_json::Value".to_string()
+                }
+            })
+            .unwrap_or_else(|| "()".to_string());
 
-        let path_params: Vec<&str> = flow.path.split('/')
+        let path_params: Vec<&str> = flow
+            .path
+            .split('/')
             .filter(|s| s.starts_with(':'))
             .map(|s| s.trim_start_matches(':'))
             .collect();
@@ -216,27 +292,60 @@ fn gen_rust_client(program: &Program, codegen_result: &codegen::CodegenResult) -
         if has_body {
             params.push(format!("body: &{}Input", pascal(&flow.name)));
         }
+        if flow.idempotency.is_some() {
+            params.push("idempotency_key: &str".into());
+        }
 
         let method = route.method.to_lowercase();
-        writeln!(out, "    pub async fn {}({}) -> Result<{return_type}, reqwest::Error> {{", snake(&flow.name), params.join(", ")).unwrap();
+        writeln!(
+            out,
+            "    pub async fn {}({}) -> Result<{return_type}, reqwest::Error> {{",
+            snake(&flow.name),
+            params.join(", ")
+        )
+        .unwrap();
 
-        let path_str = flow.path.split('/').map(|seg| {
-            if let Some(name) = seg.strip_prefix(':') {
-                format!("{{{name}}}")
-            } else {
-                seg.to_string()
-            }
-        }).collect::<Vec<_>>().join("/");
+        let path_str = flow
+            .path
+            .split('/')
+            .map(|seg| {
+                if let Some(name) = seg.strip_prefix(':') {
+                    format!("{{{name}}}")
+                } else {
+                    seg.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("/");
 
-        writeln!(out, "        let url = format!(\"{{}}/{path_str}\", self.base_url{});",
-            path_params.iter().map(|p| format!(", {p} = {p}")).collect::<String>()
-        ).unwrap();
+        writeln!(
+            out,
+            "        let url = format!(\"{{}}/{path_str}\", self.base_url{});",
+            path_params
+                .iter()
+                .map(|p| format!(", {p} = {p}"))
+                .collect::<String>()
+        )
+        .unwrap();
 
+        writeln!(out, "        let request = self.client.{method}(&url);").unwrap();
         if has_body {
-            writeln!(out, "        self.client.{method}(&url).json(body).send().await?.json().await").unwrap();
-        } else {
-            writeln!(out, "        self.client.{method}(&url).send().await?.json().await").unwrap();
+            writeln!(out, "        let request = request.json(body);").unwrap();
         }
+        if let Some(declaration) = &flow.idempotency {
+            let header = declaration
+                .key
+                .segments
+                .get(1)
+                .map(|name| name.replace('_', "-"))
+                .unwrap_or_else(|| "idempotency-key".into());
+            writeln!(
+                out,
+                "        let request = request.header(\"{header}\", idempotency_key);"
+            )
+            .unwrap();
+        }
+        writeln!(out, "        request.send().await?.json().await").unwrap();
         writeln!(out, "    }}").unwrap();
         writeln!(out).unwrap();
     }
@@ -251,7 +360,9 @@ fn infer_return_type(binding: &str, flow: &FlowDef, program: &Program) -> String
         if let FlowStep::Let(l) = step {
             if l.name == binding {
                 return match &l.expr {
-                    Expr::Fetch { source, .. } => shape_name_for_source(source, program).unwrap_or("any".into()),
+                    Expr::Fetch { source, .. } => {
+                        shape_name_for_source(source, program).unwrap_or("any".into())
+                    }
                     Expr::Query { source, .. } => {
                         let shape = shape_name_for_source(source, program).unwrap_or("any".into());
                         format!("{shape}[]")
@@ -265,6 +376,11 @@ fn infer_return_type(binding: &str, flow: &FlowDef, program: &Program) -> String
                 return shape_name_for_source(&i.source, program).unwrap_or("any".into());
             }
         }
+        if let FlowStep::Upsert(upsert) = step {
+            if upsert.binding.as_deref() == Some(binding) {
+                return shape_name_for_source(&upsert.source, program).unwrap_or("any".into());
+            }
+        }
     }
     "any".into()
 }
@@ -274,9 +390,12 @@ fn infer_rust_return_type(binding: &str, flow: &FlowDef, program: &Program) -> S
         if let FlowStep::Let(l) = step {
             if l.name == binding {
                 return match &l.expr {
-                    Expr::Fetch { source, .. } => shape_name_for_source(source, program).unwrap_or("serde_json::Value".into()),
+                    Expr::Fetch { source, .. } => {
+                        shape_name_for_source(source, program).unwrap_or("serde_json::Value".into())
+                    }
                     Expr::Query { source, .. } => {
-                        let shape = shape_name_for_source(source, program).unwrap_or("serde_json::Value".into());
+                        let shape = shape_name_for_source(source, program)
+                            .unwrap_or("serde_json::Value".into());
                         format!("Vec<{shape}>")
                     }
                     _ => "serde_json::Value".into(),
@@ -285,7 +404,14 @@ fn infer_rust_return_type(binding: &str, flow: &FlowDef, program: &Program) -> S
         }
         if let FlowStep::Insert(i) = step {
             if i.binding.as_deref() == Some(binding) {
-                return shape_name_for_source(&i.source, program).unwrap_or("serde_json::Value".into());
+                return shape_name_for_source(&i.source, program)
+                    .unwrap_or("serde_json::Value".into());
+            }
+        }
+        if let FlowStep::Upsert(upsert) = step {
+            if upsert.binding.as_deref() == Some(binding) {
+                return shape_name_for_source(&upsert.source, program)
+                    .unwrap_or("serde_json::Value".into());
             }
         }
     }
@@ -295,7 +421,11 @@ fn infer_rust_return_type(binding: &str, flow: &FlowDef, program: &Program) -> S
 fn shape_name_for_source(source_name: &str, program: &Program) -> Option<String> {
     program.constructs.iter().find_map(|c| {
         if let Construct::Source(s) = c {
-            if s.name == source_name { Some(s.shape.clone()) } else { None }
+            if s.name == source_name {
+                Some(s.shape.clone())
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -304,11 +434,19 @@ fn shape_name_for_source(source_name: &str, program: &Program) -> Option<String>
 
 fn ts_type(ty: &TypeExpr) -> String {
     match ty {
-        TypeExpr::Uuid | TypeExpr::String(_) | TypeExpr::Text | TypeExpr::Date | TypeExpr::Timestamp => "string".into(),
+        TypeExpr::Uuid
+        | TypeExpr::String(_)
+        | TypeExpr::Text
+        | TypeExpr::Date
+        | TypeExpr::Timestamp => "string".into(),
         TypeExpr::Int { .. } | TypeExpr::Decimal { .. } => "number".into(),
         TypeExpr::Bool => "boolean".into(),
         TypeExpr::Json => "any".into(),
-        TypeExpr::Enum(variants) => variants.iter().map(|v| format!("'{v}'")).collect::<Vec<_>>().join(" | "),
+        TypeExpr::Enum(variants) => variants
+            .iter()
+            .map(|v| format!("'{v}'"))
+            .collect::<Vec<_>>()
+            .join(" | "),
         TypeExpr::List(inner) => format!("{}[]", ts_type(inner)),
         TypeExpr::Maybe(inner) => format!("{} | null", ts_type(inner)),
         TypeExpr::Map(_, v) => format!("Record<string, {}>", ts_type(v)),
@@ -336,13 +474,15 @@ fn rust_type(ty: &TypeExpr) -> String {
 }
 
 fn pascal(s: &str) -> String {
-    s.split('_').map(|w| {
-        let mut c = w.chars();
-        match c.next() {
-            None => String::new(),
-            Some(f) => f.to_uppercase().to_string() + &c.as_str().to_lowercase(),
-        }
-    }).collect()
+    s.split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().to_string() + &c.as_str().to_lowercase(),
+            }
+        })
+        .collect()
 }
 
 fn camel(s: &str) -> String {
@@ -390,7 +530,11 @@ FLOW get_user get /users/:id
 
         assert!(client.typescript.contains("export interface User"));
         assert!(client.typescript.contains("export class AxisClient"));
-        assert!(client.typescript.contains("async getUser(id: string): Promise<User>"));
+        assert!(
+            client
+                .typescript
+                .contains("async getUser(id: string): Promise<User>")
+        );
         assert!(client.typescript.contains("this.request<User>('GET'"));
     }
 
@@ -421,8 +565,16 @@ FLOW create_user post /users
         let program = compile_source(input).unwrap();
         let client = generate_client(&program);
 
-        assert!(client.typescript.contains("export interface CreateUserInput"));
-        assert!(client.typescript.contains("async createUser(body: CreateUserInput): Promise<User>"));
+        assert!(
+            client
+                .typescript
+                .contains("export interface CreateUserInput")
+        );
+        assert!(
+            client
+                .typescript
+                .contains("async createUser(body: CreateUserInput): Promise<User>")
+        );
         assert!(client.typescript.contains("'POST'"));
     }
 
@@ -478,7 +630,11 @@ FLOW get_user get /users/:id
 
         assert!(client.rust.contains("pub struct User"));
         assert!(client.rust.contains("pub struct AxisClient"));
-        assert!(client.rust.contains("pub async fn get_user(&self, id: &str) -> Result<User, reqwest::Error>"));
+        assert!(
+            client
+                .rust
+                .contains("pub async fn get_user(&self, id: &str) -> Result<User, reqwest::Error>")
+        );
     }
 
     #[test]
@@ -516,8 +672,9 @@ FLOW create_user post /users
     #[test]
     fn test_full_example_client() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let program = compile_source(&input).unwrap();
         let client = generate_client(&program);
 
@@ -525,5 +682,24 @@ FLOW create_user post /users
         assert!(client.rust.contains("AxisClient"));
         assert!(client.typescript.contains("listOrders"));
         assert!(client.rust.contains("list_orders"));
+    }
+
+    #[test]
+    fn test_idempotent_clients_require_operation_key() {
+        let program =
+            compile_source(include_str!("../../examples/messenger-primitives.axis")).unwrap();
+        let client = generate_client(&program);
+        assert!(client.typescript.contains("idempotencyKey: string"));
+        assert!(
+            client
+                .typescript
+                .contains("{ 'idempotency-key': idempotencyKey }")
+        );
+        assert!(client.rust.contains("idempotency_key: &str"));
+        assert!(
+            client
+                .rust
+                .contains("request.header(\"idempotency-key\", idempotency_key)")
+        );
     }
 }

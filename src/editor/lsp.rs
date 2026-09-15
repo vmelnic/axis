@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::*;
 
-use crate::ast::{self, Construct, Expr, FlowStep, Program};
+use crate::ast::{self, Construct, EffectField, Expr, FlowStep, Program};
 use crate::incremental;
 use crate::project;
 use crate::verify::Verifier;
@@ -14,9 +14,7 @@ pub fn run_lsp() -> Result<(), Box<dyn Error + Sync + Send>> {
     let (connection, io_threads) = Connection::stdio();
 
     let capabilities = ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(
-            TextDocumentSyncKind::FULL,
-        )),
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         completion_provider: Some(CompletionOptions {
             trigger_characters: Some(vec!["\n".into(), " ".into()]),
             ..Default::default()
@@ -64,7 +62,9 @@ struct WorkspaceIndex {
 
 impl WorkspaceIndex {
     fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     #[allow(clippy::mutable_key_type)]
@@ -108,7 +108,9 @@ impl WorkspaceIndex {
     }
 
     fn find_definition(&self, name: &str, kind: ConstructKind) -> Option<&ConstructEntry> {
-        self.entries.iter().find(|e| e.name == name && e.kind == kind)
+        self.entries
+            .iter()
+            .find(|e| e.name == name && e.kind == kind)
     }
 
     fn find_definition_any(&self, name: &str) -> Option<&ConstructEntry> {
@@ -295,7 +297,9 @@ fn handle_notification(
         "textDocument/didOpen" => {
             let params: DidOpenTextDocumentParams = serde_json::from_value(notif.params)?;
             let uri = params.text_document.uri.clone();
-            state.documents.insert(uri.clone(), params.text_document.text);
+            state
+                .documents
+                .insert(uri.clone(), params.text_document.text);
             if state.workspace_root.is_none() {
                 if let Some(p) = uri_to_path(&uri) {
                     state.workspace_root = find_workspace_root(&p);
@@ -322,10 +326,12 @@ fn handle_notification(
                 diagnostics: Vec::new(),
                 version: None,
             };
-            connection.sender.send(Message::Notification(Notification::new(
-                "textDocument/publishDiagnostics".into(),
-                clear,
-            )))?;
+            connection
+                .sender
+                .send(Message::Notification(Notification::new(
+                    "textDocument/publishDiagnostics".into(),
+                    clear,
+                )))?;
         }
         "textDocument/didSave" => {
             state.rebuild_index();
@@ -349,15 +355,20 @@ fn publish_diagnostics_all(
         if result.is_ok() {
             let verifier = Verifier::new();
             let verify_result = verifier.verify(&result.program);
-            for e in verify_result.errors.iter().chain(verify_result.warnings.iter()) {
+            for e in verify_result
+                .errors
+                .iter()
+                .chain(verify_result.warnings.iter())
+            {
                 for file in &result.files {
                     if let Ok(file_uri) = format!("file://{}", file.path.display()).parse::<Uri>() {
                         if !state.documents.contains_key(&file_uri) {
-                            let severity = if verify_result.errors.iter().any(|ve| std::ptr::eq(ve, e)) {
-                                DiagnosticSeverity::ERROR
-                            } else {
-                                DiagnosticSeverity::WARNING
-                            };
+                            let severity =
+                                if verify_result.errors.iter().any(|ve| std::ptr::eq(ve, e)) {
+                                    DiagnosticSeverity::ERROR
+                                } else {
+                                    DiagnosticSeverity::WARNING
+                                };
                             let params = PublishDiagnosticsParams {
                                 uri: file_uri,
                                 diagnostics: vec![Diagnostic {
@@ -369,10 +380,12 @@ fn publish_diagnostics_all(
                                 }],
                                 version: None,
                             };
-                            connection.sender.send(Message::Notification(Notification::new(
-                                "textDocument/publishDiagnostics".into(),
-                                params,
-                            )))?;
+                            connection
+                                .sender
+                                .send(Message::Notification(Notification::new(
+                                    "textDocument/publishDiagnostics".into(),
+                                    params,
+                                )))?;
                         }
                     }
                 }
@@ -397,7 +410,11 @@ fn publish_diagnostics(
     match project::compile_source(source) {
         Ok(program) => {
             let merged = state.merged_program();
-            let merged = if merged.constructs.is_empty() { program } else { merged };
+            let merged = if merged.constructs.is_empty() {
+                program
+            } else {
+                merged
+            };
             let verifier = Verifier::new();
             let result = verifier.verify(&merged);
             for e in &result.errors {
@@ -458,17 +475,16 @@ fn publish_diagnostics(
         diagnostics,
         version: None,
     };
-    connection.sender.send(Message::Notification(Notification::new(
-        "textDocument/publishDiagnostics".into(),
-        params,
-    )))?;
+    connection
+        .sender
+        .send(Message::Notification(Notification::new(
+            "textDocument/publishDiagnostics".into(),
+            params,
+        )))?;
     Ok(())
 }
 
-fn handle_completion(
-    state: &ServerState,
-    params: &CompletionParams,
-) -> Option<CompletionResponse> {
+fn handle_completion(state: &ServerState, params: &CompletionParams) -> Option<CompletionResponse> {
     let uri = &params.text_document_position.text_document.uri;
     let source = state.documents.get(uri)?;
     let pos = params.text_document_position.position;
@@ -519,7 +535,13 @@ fn completion_context(line: &str) -> CompletionContext {
     if upper.starts_with("SHAPE") || upper.contains("SHAPE ") {
         return CompletionContext::ShapeName;
     }
-    if upper.starts_with("FETCH ") || upper.starts_with("QUERY ") || upper.starts_with("INSERT ") || upper.starts_with("UPDATE ") || upper.starts_with("DELETE ") {
+    if upper.starts_with("FETCH ")
+        || upper.starts_with("QUERY ")
+        || upper.starts_with("INSERT ")
+        || upper.starts_with("UPSERT ")
+        || upper.starts_with("UPDATE ")
+        || upper.starts_with("DELETE ")
+    {
         return CompletionContext::SourceName;
     }
     if upper.starts_with("REALM ") && !upper.contains("CAPABILITY") {
@@ -544,8 +566,13 @@ fn workspace_completions(state: &ServerState, ctx: CompletionContext) -> Vec<Com
         CompletionContext::None => return Vec::new(),
     };
 
-    let Some(filter) = kind_filter else { return Vec::new() };
-    state.index.entries.iter()
+    let Some(filter) = kind_filter else {
+        return Vec::new();
+    };
+    state
+        .index
+        .entries
+        .iter()
         .filter(|e| e.kind == filter)
         .map(|e| CompletionItem {
             label: e.name.clone(),
@@ -617,11 +644,15 @@ fn handle_goto_definition(
 
     let local_prog = project::compile_source(source).ok()?;
     if let Some(kind) = kind_filter {
-        find_construct_span(&local_prog, &word, kind)
-            .map(|span| goto_location(uri.clone(), span))
+        find_construct_span(&local_prog, &word, kind).map(|span| goto_location(uri.clone(), span))
     } else {
-        for kind in &[ConstructKind::Shape, ConstructKind::Source, ConstructKind::Realm,
-                      ConstructKind::Flow, ConstructKind::Service] {
+        for kind in &[
+            ConstructKind::Shape,
+            ConstructKind::Source,
+            ConstructKind::Realm,
+            ConstructKind::Flow,
+            ConstructKind::Service,
+        ] {
             if let Some(span) = find_construct_span(&local_prog, &word, *kind) {
                 return Some(goto_location(uri.clone(), span));
             }
@@ -630,10 +661,7 @@ fn handle_goto_definition(
     }
 }
 
-fn handle_references(
-    state: &ServerState,
-    params: &ReferenceParams,
-) -> Option<Vec<Location>> {
+fn handle_references(state: &ServerState, params: &ReferenceParams) -> Option<Vec<Location>> {
     let uri = &params.text_document_position.text_document.uri;
     let source = state.documents.get(uri)?;
     let pos = params.text_document_position.position;
@@ -665,7 +693,11 @@ fn handle_references(
         }
     }
 
-    if locations.is_empty() { None } else { Some(locations) }
+    if locations.is_empty() {
+        None
+    } else {
+        Some(locations)
+    }
 }
 
 fn handle_document_symbols(
@@ -676,34 +708,38 @@ fn handle_document_symbols(
     let source = state.documents.get(uri)?;
     let program = project::compile_source(source).ok()?;
 
-    let symbols: Vec<SymbolInformation> = program.constructs.iter().map(|c| {
-        let (name, kind, span) = match c {
-            Construct::Shape(s) => (s.name.clone(), SymbolKind::STRUCT, s.span),
-            Construct::Source(s) => (s.name.clone(), SymbolKind::NAMESPACE, s.span),
-            Construct::Realm(r) => (r.name.clone(), SymbolKind::MODULE, r.span),
-            Construct::Policy(p) => (p.name.clone(), SymbolKind::INTERFACE, p.span),
-            Construct::Service(s) => (s.name.clone(), SymbolKind::CLASS, s.span),
-            Construct::Flow(f) => (f.name.clone(), SymbolKind::FUNCTION, f.span),
-            Construct::Saga(s) => (s.name.clone(), SymbolKind::FUNCTION, s.span),
-            Construct::Surface(s) => (s.name.clone(), SymbolKind::PACKAGE, s.span),
-            Construct::Migrate(m) => (m.shape.clone(), SymbolKind::EVENT, m.span),
-            Construct::Stream(s) => (s.name.clone(), SymbolKind::EVENT, s.span),
-            Construct::Func(f) => (f.name.clone(), SymbolKind::FUNCTION, f.span),
-            Construct::Storage(s) => (s.name.clone(), SymbolKind::NAMESPACE, s.span),
-        };
-        #[allow(deprecated)]
-        SymbolInformation {
-            name,
-            kind,
-            tags: None,
-            deprecated: None,
-            location: Location {
-                uri: uri.clone(),
-                range: span_to_range(span),
-            },
-            container_name: None,
-        }
-    }).collect();
+    let symbols: Vec<SymbolInformation> = program
+        .constructs
+        .iter()
+        .map(|c| {
+            let (name, kind, span) = match c {
+                Construct::Shape(s) => (s.name.clone(), SymbolKind::STRUCT, s.span),
+                Construct::Source(s) => (s.name.clone(), SymbolKind::NAMESPACE, s.span),
+                Construct::Realm(r) => (r.name.clone(), SymbolKind::MODULE, r.span),
+                Construct::Policy(p) => (p.name.clone(), SymbolKind::INTERFACE, p.span),
+                Construct::Service(s) => (s.name.clone(), SymbolKind::CLASS, s.span),
+                Construct::Flow(f) => (f.name.clone(), SymbolKind::FUNCTION, f.span),
+                Construct::Saga(s) => (s.name.clone(), SymbolKind::FUNCTION, s.span),
+                Construct::Surface(s) => (s.name.clone(), SymbolKind::PACKAGE, s.span),
+                Construct::Migrate(m) => (m.shape.clone(), SymbolKind::EVENT, m.span),
+                Construct::Stream(s) => (s.name.clone(), SymbolKind::EVENT, s.span),
+                Construct::Func(f) => (f.name.clone(), SymbolKind::FUNCTION, f.span),
+                Construct::Storage(s) => (s.name.clone(), SymbolKind::NAMESPACE, s.span),
+            };
+            #[allow(deprecated)]
+            SymbolInformation {
+                name,
+                kind,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: uri.clone(),
+                    range: span_to_range(span),
+                },
+                container_name: None,
+            }
+        })
+        .collect();
 
     Some(DocumentSymbolResponse::Flat(symbols))
 }
@@ -725,7 +761,10 @@ fn handle_formatting(
     let line_count = source.lines().count().max(1);
     Some(vec![TextEdit {
         range: Range {
-            start: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
             end: Position {
                 line: line_count as u32,
                 character: 0,
@@ -735,10 +774,7 @@ fn handle_formatting(
     }])
 }
 
-fn handle_hover(
-    state: &ServerState,
-    params: &HoverParams,
-) -> Option<Hover> {
+fn handle_hover(state: &ServerState, params: &HoverParams) -> Option<Hover> {
     let uri = &params.text_document_position_params.text_document.uri;
     let source = state.documents.get(uri)?;
     let pos = params.text_document_position_params.position;
@@ -758,53 +794,98 @@ fn handle_hover(
     for c in constructs {
         match c {
             Construct::Shape(s) if s.name == word => {
-                let fields: Vec<String> = s.fields.iter().map(|f| {
-                    format!("  {} {}", f.name, format_type(&f.ty))
-                }).collect();
+                let fields: Vec<String> = s
+                    .fields
+                    .iter()
+                    .map(|f| format!("  {} {}", f.name, format_type(&f.ty)))
+                    .collect();
                 let md = format!("**SHAPE** `{}`\n\n```\n{}\n```", s.name, fields.join("\n"));
                 return Some(hover_md(md));
             }
             Construct::Source(s) if s.name == word => {
-                let idx: Vec<String> = s.indexes.iter().map(|ix| {
-                    let fields: Vec<String> = ix.fields.iter().map(|f| {
-                        if let Some(ref suf) = f.suffix {
-                            format!("{} {suf:?}", f.name)
-                        } else {
-                            f.name.clone()
-                        }
-                    }).collect();
-                    format!("  INDEX {}", fields.join(" "))
-                }).collect();
-                let md = format!("**SOURCE** `{}` ({:?})\n\n```\nSHAPE {}\n{}\n```",
-                    s.name, s.source_type, s.shape, idx.join("\n"));
+                let idx: Vec<String> = s
+                    .indexes
+                    .iter()
+                    .map(|ix| {
+                        let fields: Vec<String> = ix
+                            .fields
+                            .iter()
+                            .map(|f| {
+                                if let Some(ref suf) = f.suffix {
+                                    format!("{} {suf:?}", f.name)
+                                } else {
+                                    f.name.clone()
+                                }
+                            })
+                            .collect();
+                        format!("  INDEX {}", fields.join(" "))
+                    })
+                    .collect();
+                let md = format!(
+                    "**SOURCE** `{}` ({:?})\n\n```\nSHAPE {}\n{}\n```",
+                    s.name,
+                    s.source_type,
+                    s.shape,
+                    idx.join("\n")
+                );
                 return Some(hover_md(md));
             }
             Construct::Flow(f) if f.name == word => {
                 let method = format!("{:?}", f.method).to_uppercase();
-                let auth = f.auth.as_ref().map(|a| format!("\n  AUTH {a:?}")).unwrap_or_default();
-                let realm = f.realm.as_ref().map(|r| format!("\n  REALM {r}")).unwrap_or_default();
-                let md = format!("**FLOW** `{}` `{} {}`{}{}", f.name, method, f.path, realm, auth);
+                let auth = f
+                    .auth
+                    .as_ref()
+                    .map(|a| format!("\n  AUTH {a:?}"))
+                    .unwrap_or_default();
+                let realm = f
+                    .realm
+                    .as_ref()
+                    .map(|r| format!("\n  REALM {r}"))
+                    .unwrap_or_default();
+                let md = format!(
+                    "**FLOW** `{}` `{} {}`{}{}",
+                    f.name, method, f.path, realm, auth
+                );
                 return Some(hover_md(md));
             }
             Construct::Realm(r) if r.name == word => {
-                let caps: Vec<String> = r.capabilities.iter().map(|c| {
-                    format!("  {:?} {}", c.kind, c.target)
-                }).collect();
-                let tenant = r.tenant.as_ref().map(|t| format!("  TENANT {t}\n")).unwrap_or_default();
-                let md = format!("**REALM** `{}`\n\n```\n{}{}\n```", r.name, tenant, caps.join("\n"));
+                let caps: Vec<String> = r
+                    .capabilities
+                    .iter()
+                    .map(|c| format!("  {:?} {}", c.kind, c.target))
+                    .collect();
+                let tenant = r
+                    .tenant
+                    .as_ref()
+                    .map(|t| format!("  TENANT {t}\n"))
+                    .unwrap_or_default();
+                let md = format!(
+                    "**REALM** `{}`\n\n```\n{}{}\n```",
+                    r.name,
+                    tenant,
+                    caps.join("\n")
+                );
                 return Some(hover_md(md));
             }
             Construct::Service(s) if s.name == word => {
-                let methods: Vec<String> = s.methods.iter().map(|m| {
-                    format!("  METHOD {}", m.name)
-                }).collect();
-                let md = format!("**SERVICE** `{}`\n\n```\n{}\n```", s.name, methods.join("\n"));
+                let methods: Vec<String> = s
+                    .methods
+                    .iter()
+                    .map(|m| format!("  METHOD {}", m.name))
+                    .collect();
+                let md = format!(
+                    "**SERVICE** `{}`\n\n```\n{}\n```",
+                    s.name,
+                    methods.join("\n")
+                );
                 return Some(hover_md(md));
             }
             Construct::Saga(s) if s.name == word => {
-                let steps: Vec<String> = s.steps.iter().map(|st| {
-                    format!("  STEP {}", st.name)
-                }).collect();
+                let steps: Vec<String> = s
+                    .steps
+                    .iter()
+                    .map(|st| format!("  STEP {}", st.name))
+                    .collect();
                 let md = format!("**SAGA** `{}`\n\n```\n{}\n```", s.name, steps.join("\n"));
                 return Some(hover_md(md));
             }
@@ -813,26 +894,41 @@ fn handle_hover(
                 return Some(hover_md(md));
             }
             Construct::Policy(p) if p.name == word => {
-                let reqs: Vec<String> = p.requires.iter().map(|r| {
-                    format!("  {:?}", r)
-                }).collect();
+                let reqs: Vec<String> = p.requires.iter().map(|r| format!("  {:?}", r)).collect();
                 let md = format!("**POLICY** `{}`\n\n```\n{}\n```", p.name, reqs.join("\n"));
                 return Some(hover_md(md));
             }
             Construct::Stream(s) if s.name == word => {
-                let events: Vec<String> = s.events.iter().map(|e| {
-                    let fields: Vec<String> = e.fields.iter().map(|f| format!("{} {}", f.name, format_type(&f.ty))).collect();
-                    format!("  EVENT {} [{}]", e.name, fields.join(", "))
-                }).collect();
+                let events: Vec<String> = s
+                    .events
+                    .iter()
+                    .map(|e| {
+                        let fields: Vec<String> = e
+                            .fields
+                            .iter()
+                            .map(|f| format!("{} {}", f.name, format_type(&f.ty)))
+                            .collect();
+                        format!("  EVENT {} [{}]", e.name, fields.join(", "))
+                    })
+                    .collect();
                 let transport = match s.transport {
                     ast::StreamTransport::WebSocket => "ws",
                     ast::StreamTransport::Sse => "sse",
                 };
-                let md = format!("**STREAM** `{}` `{} {}`\n\n```\n{}\n```", s.name, transport, s.path, events.join("\n"));
+                let md = format!(
+                    "**STREAM** `{}` `{} {}`\n\n```\n{}\n```",
+                    s.name,
+                    transport,
+                    s.path,
+                    events.join("\n")
+                );
                 return Some(hover_md(md));
             }
             Construct::Migrate(m) if m.shape == word => {
-                let md = format!("**MIGRATE** `{}` {} → {}", m.shape, m.from_version, m.to_version);
+                let md = format!(
+                    "**MIGRATE** `{}` {} → {}",
+                    m.shape, m.from_version, m.to_version
+                );
                 return Some(hover_md(md));
             }
             _ => {}
@@ -841,7 +937,12 @@ fn handle_hover(
         if let Construct::Shape(s) = c {
             for field in &s.fields {
                 if field.name == word {
-                    let md = format!("**field** `{}.{}`: `{}`", s.name, field.name, format_type(&field.ty));
+                    let md = format!(
+                        "**field** `{}.{}`: `{}`",
+                        s.name,
+                        field.name,
+                        format_type(&field.ty)
+                    );
                     return Some(hover_md(md));
                 }
             }
@@ -855,7 +956,10 @@ fn handle_workspace_symbol(
     params: &WorkspaceSymbolParams,
 ) -> Option<Vec<SymbolInformation>> {
     let query = params.query.to_lowercase();
-    let symbols: Vec<SymbolInformation> = state.index.entries.iter()
+    let symbols: Vec<SymbolInformation> = state
+        .index
+        .entries
+        .iter()
         .filter(|e| query.is_empty() || e.name.to_lowercase().contains(&query))
         .filter_map(|e| {
             let uri = path_to_uri(&e.path)?;
@@ -875,7 +979,11 @@ fn handle_workspace_symbol(
         })
         .collect();
 
-    if symbols.is_empty() { None } else { Some(symbols) }
+    if symbols.is_empty() {
+        None
+    } else {
+        Some(symbols)
+    }
 }
 
 fn handle_prepare_rename(
@@ -904,19 +1012,30 @@ fn handle_prepare_rename(
     let col = pos.character as usize;
     let bytes = line_str.as_bytes();
     let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let start = (0..col).rev().take_while(|&i| is_word(bytes[i])).last().unwrap_or(col);
-    let end = (col..bytes.len()).take_while(|&i| is_word(bytes[i])).last().unwrap_or(col) + 1;
+    let start = (0..col)
+        .rev()
+        .take_while(|&i| is_word(bytes[i]))
+        .last()
+        .unwrap_or(col);
+    let end = (col..bytes.len())
+        .take_while(|&i| is_word(bytes[i]))
+        .last()
+        .unwrap_or(col)
+        + 1;
 
     Some(PrepareRenameResponse::Range(Range {
-        start: Position { line: pos.line, character: start as u32 },
-        end: Position { line: pos.line, character: end as u32 },
+        start: Position {
+            line: pos.line,
+            character: start as u32,
+        },
+        end: Position {
+            line: pos.line,
+            character: end as u32,
+        },
     }))
 }
 
-fn handle_rename(
-    state: &ServerState,
-    params: &RenameParams,
-) -> Option<WorkspaceEdit> {
+fn handle_rename(state: &ServerState, params: &RenameParams) -> Option<WorkspaceEdit> {
     let uri = &params.text_document_position.text_document.uri;
     let source = state.documents.get(uri)?;
     let pos = params.text_document_position.position;
@@ -978,8 +1097,14 @@ fn find_rename_edits(source: &str, old_name: &str, new_name: &str) -> Vec<TextEd
                 if before_ok && after_ok {
                     edits.push(TextEdit {
                         range: Range {
-                            start: Position { line: line_idx as u32, character: abs_pos as u32 },
-                            end: Position { line: line_idx as u32, character: end_pos as u32 },
+                            start: Position {
+                                line: line_idx as u32,
+                                character: abs_pos as u32,
+                            },
+                            end: Position {
+                                line: line_idx as u32,
+                                character: end_pos as u32,
+                            },
                         },
                         new_text: new_name.to_string(),
                     });
@@ -1024,7 +1149,20 @@ fn construct_kind_to_symbol(kind: ConstructKind) -> SymbolKind {
 // --- Reference resolution ---
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum ConstructKind { Shape, Source, Realm, Flow, Service, Saga, Policy, Surface, Migrate, Stream, Func, Storage }
+enum ConstructKind {
+    Shape,
+    Source,
+    Realm,
+    Flow,
+    Service,
+    Saga,
+    Policy,
+    Surface,
+    Migrate,
+    Stream,
+    Func,
+    Storage,
+}
 
 enum RefContext {
     ShapeName,
@@ -1062,14 +1200,20 @@ fn reference_context(source: &str, line_idx: usize, _word: &str) -> RefContext {
     }
 }
 
-fn find_construct_span(program: &Program, name: &str, kind: ConstructKind) -> Option<crate::token::Span> {
+fn find_construct_span(
+    program: &Program,
+    name: &str,
+    kind: ConstructKind,
+) -> Option<crate::token::Span> {
     for c in &program.constructs {
         match (c, kind) {
             (Construct::Shape(s), ConstructKind::Shape) if s.name == name => return Some(s.span),
             (Construct::Source(s), ConstructKind::Source) if s.name == name => return Some(s.span),
             (Construct::Realm(r), ConstructKind::Realm) if r.name == name => return Some(r.span),
             (Construct::Flow(f), ConstructKind::Flow) if f.name == name => return Some(f.span),
-            (Construct::Service(s), ConstructKind::Service) if s.name == name => return Some(s.span),
+            (Construct::Service(s), ConstructKind::Service) if s.name == name => {
+                return Some(s.span);
+            }
             _ => {}
         }
     }
@@ -1080,30 +1224,42 @@ fn collect_references(construct: &Construct, name: &str) -> Vec<crate::token::Sp
     let mut refs = Vec::new();
     match construct {
         Construct::Source(s) => {
-            if s.shape == name { refs.push(s.span); }
+            if s.shape == name {
+                refs.push(s.span);
+            }
         }
         Construct::Flow(f) => {
-            if f.realm.as_deref() == Some(name) { refs.push(f.span); }
+            if f.realm.as_deref() == Some(name) {
+                refs.push(f.span);
+            }
             collect_refs_in_steps(&f.steps, name, &mut refs);
             collect_refs_in_expr_option(&f.return_stmt.body, name, &mut refs, f.return_stmt.span);
         }
         Construct::Saga(s) => {
-            if s.realm.as_deref() == Some(name) { refs.push(s.span); }
+            if s.realm.as_deref() == Some(name) {
+                refs.push(s.span);
+            }
             for step in &s.steps {
                 collect_refs_in_steps(&step.flow_steps, name, &mut refs);
             }
         }
         Construct::Surface(s) => {
             for route in &s.routes {
-                if route.target == name { refs.push(s.span); }
+                if route.target == name {
+                    refs.push(s.span);
+                }
             }
         }
         Construct::Migrate(m) => {
-            if m.shape == name { refs.push(m.span); }
+            if m.shape == name {
+                refs.push(m.span);
+            }
         }
         Construct::Realm(r) => {
             for cap in &r.capabilities {
-                if cap.target == name { refs.push(r.span); }
+                if cap.target == name {
+                    refs.push(r.span);
+                }
             }
         }
         _ => {}
@@ -1118,42 +1274,203 @@ fn collect_refs_in_steps(steps: &[FlowStep], name: &str, refs: &mut Vec<crate::t
                 collect_refs_in_expr(&l.expr, name, refs, l.span);
             }
             FlowStep::Insert(i) => {
-                if i.source == name { refs.push(i.span); }
+                if i.source == name {
+                    refs.push(i.span);
+                }
+                for (_, expression) in &i.fields {
+                    collect_refs_in_expr(expression, name, refs, i.span);
+                }
+            }
+            FlowStep::Upsert(upsert) => {
+                if upsert.source == name {
+                    refs.push(upsert.span);
+                }
+                for (_, expression) in &upsert.keys {
+                    collect_refs_in_expr(expression, name, refs, upsert.span);
+                }
+                for set in &upsert.sets {
+                    collect_refs_in_expr(&set.value, name, refs, upsert.span);
+                }
             }
             FlowStep::Update(u) => {
-                if u.source == name { refs.push(u.span); }
+                if u.source == name {
+                    refs.push(u.span);
+                }
+                for filter in &u.wheres {
+                    collect_refs_in_expr(&filter.value, name, refs, u.span);
+                }
+                for set in &u.sets {
+                    collect_refs_in_expr(&set.value, name, refs, u.span);
+                }
             }
             FlowStep::Delete(d) => {
-                if d.source == name { refs.push(d.span); }
+                if d.source == name {
+                    refs.push(d.span);
+                }
+                for filter in &d.wheres {
+                    collect_refs_in_expr(&filter.value, name, refs, d.span);
+                }
+            }
+            FlowStep::Fanout(fanout) => {
+                collect_refs_in_expr(&fanout.source, name, refs, fanout.span);
+                if fanout.insert.source == name {
+                    refs.push(fanout.span);
+                }
+                for (_, expression) in &fanout.insert.fields {
+                    collect_refs_in_expr(expression, name, refs, fanout.span);
+                }
             }
             FlowStep::Match(m) => {
                 for branch in &m.branches {
+                    collect_refs_in_expr(&branch.condition, name, refs, m.span);
                     collect_refs_in_steps(&branch.steps, name, refs);
                 }
                 if let Some(default) = &m.default {
                     collect_refs_in_steps(default, name, refs);
                 }
             }
-            _ => {}
+            FlowStep::Each(each) => {
+                collect_refs_in_expr(&each.source, name, refs, each.span);
+                collect_refs_in_steps(&each.steps, name, refs);
+            }
+            FlowStep::Try(step) => {
+                collect_refs_in_steps(&step.body, name, refs);
+                collect_refs_in_steps(&step.recover, name, refs);
+            }
+            FlowStep::Rule(rule) => {
+                for requirement in &rule.requires {
+                    collect_refs_in_expr(&requirement.value, name, refs, rule.span);
+                }
+            }
+            FlowStep::Guard(guard) => {
+                collect_refs_in_expr(&guard.expr, name, refs, guard.span);
+            }
+            FlowStep::Set(set) => collect_refs_in_expr(&set.expr, name, refs, set.span),
+            FlowStep::Effect(effect) => {
+                for field in &effect.fields {
+                    match field {
+                        EffectField::To(expression) | EffectField::Url(expression) => {
+                            collect_refs_in_expr(expression, name, refs, effect.span);
+                        }
+                        EffectField::Data(expressions) => {
+                            for expression in expressions {
+                                collect_refs_in_expr(expression, name, refs, effect.span);
+                            }
+                        }
+                        EffectField::Template(_) | EffectField::Event(_) | EffectField::Task(_) => {
+                        }
+                    }
+                }
+            }
+            FlowStep::Upload(upload) => {
+                if upload.storage == name {
+                    refs.push(upload.span);
+                }
+                collect_refs_in_expr(&upload.file_expr, name, refs, upload.span);
+            }
         }
     }
 }
 
-fn collect_refs_in_expr(expr: &Expr, name: &str, refs: &mut Vec<crate::token::Span>, span: crate::token::Span) {
+fn collect_refs_in_expr(
+    expr: &Expr,
+    name: &str,
+    refs: &mut Vec<crate::token::Span>,
+    span: crate::token::Span,
+) {
     match expr {
-        Expr::Fetch { source, .. } | Expr::Query { source, .. } => {
-            if source == name { refs.push(span); }
+        Expr::Fetch {
+            source, filters, ..
         }
-        Expr::Call { service, .. } => {
-            if service == name { refs.push(span); }
+        | Expr::Query {
+            source, filters, ..
+        } => {
+            if source == name {
+                refs.push(span);
+            }
+            for filter in filters {
+                collect_refs_in_expr(&filter.value, name, refs, span);
+            }
         }
-        _ => {}
+        Expr::Call { service, args, .. } => {
+            if service == name {
+                refs.push(span);
+            }
+            for (_, expression) in args {
+                collect_refs_in_expr(expression, name, refs, span);
+            }
+        }
+        Expr::Unary { operand, .. }
+        | Expr::Aggregate {
+            source: operand, ..
+        }
+        | Expr::NowOffset {
+            amount: operand, ..
+        }
+        | Expr::Cached { expr: operand, .. }
+        | Expr::MapExpr {
+            source: operand, ..
+        }
+        | Expr::ReduceExpr {
+            source: operand, ..
+        } => {
+            collect_refs_in_expr(operand, name, refs, span);
+        }
+        Expr::Binary { left, right, .. }
+        | Expr::Coalesce {
+            value: left,
+            default: right,
+        }
+        | Expr::SplitExpr {
+            value: left,
+            delimiter: right,
+        } => {
+            collect_refs_in_expr(left, name, refs, span);
+            collect_refs_in_expr(right, name, refs, span);
+        }
+        Expr::Ternary { a, b, c, .. } => {
+            collect_refs_in_expr(a, name, refs, span);
+            collect_refs_in_expr(b, name, refs, span);
+            collect_refs_in_expr(c, name, refs, span);
+        }
+        Expr::If { cond, then, else_ } => {
+            collect_refs_in_expr(cond, name, refs, span);
+            collect_refs_in_expr(then, name, refs, span);
+            collect_refs_in_expr(else_, name, refs, span);
+        }
+        Expr::FilterExpr { source, condition } => {
+            collect_refs_in_expr(source, name, refs, span);
+            collect_refs_in_expr(condition, name, refs, span);
+        }
+        Expr::ReplaceExpr { value, from, to } => {
+            collect_refs_in_expr(value, name, refs, span);
+            collect_refs_in_expr(from, name, refs, span);
+            collect_refs_in_expr(to, name, refs, span);
+        }
+        Expr::FormatExpr { args, .. } | Expr::FuncCall { args, .. } => {
+            for expression in args {
+                collect_refs_in_expr(expression, name, refs, span);
+            }
+        }
+        Expr::Render { vars, .. } | Expr::Translate { vars, .. } => {
+            for (_, expression) in vars {
+                collect_refs_in_expr(expression, name, refs, span);
+            }
+        }
+        Expr::Literal(_) | Expr::DotPath(_) | Expr::WasmCall { .. } => {}
     }
 }
 
-fn collect_refs_in_expr_option(body: &Option<ast::ReturnBody>, name: &str, refs: &mut Vec<crate::token::Span>, span: crate::token::Span) {
+fn collect_refs_in_expr_option(
+    body: &Option<ast::ReturnBody>,
+    name: &str,
+    refs: &mut Vec<crate::token::Span>,
+    span: crate::token::Span,
+) {
     if let Some(ast::ReturnBody::Binding(b)) = body {
-        if b == name { refs.push(span); }
+        if b == name {
+            refs.push(span);
+        }
     }
 }
 
@@ -1199,12 +1516,24 @@ fn span_in_source(span: crate::token::Span, source: &str) -> bool {
 fn error_position(e: &crate::error::AxisError) -> (usize, usize, String) {
     match e {
         crate::error::AxisError::LexError { line, col, message } => (*line, *col, message.clone()),
-        crate::error::AxisError::ParseError { line, col, message } => (*line, *col, message.clone()),
-        crate::error::AxisError::TypeError { span, message } => (span.line, span.col, message.clone()),
-        crate::error::AxisError::IndexError { span, message } => (span.line, span.col, message.clone()),
-        crate::error::AxisError::CapabilityError { span, message } => (span.line, span.col, message.clone()),
-        crate::error::AxisError::PolicyViolation { span, message } => (span.line, span.col, message.clone()),
-        crate::error::AxisError::TenantError { span, message } => (span.line, span.col, message.clone()),
+        crate::error::AxisError::ParseError { line, col, message } => {
+            (*line, *col, message.clone())
+        }
+        crate::error::AxisError::TypeError { span, message } => {
+            (span.line, span.col, message.clone())
+        }
+        crate::error::AxisError::IndexError { span, message } => {
+            (span.line, span.col, message.clone())
+        }
+        crate::error::AxisError::CapabilityError { span, message } => {
+            (span.line, span.col, message.clone())
+        }
+        crate::error::AxisError::PolicyViolation { span, message } => {
+            (span.line, span.col, message.clone())
+        }
+        crate::error::AxisError::TenantError { span, message } => {
+            (span.line, span.col, message.clone())
+        }
     }
 }
 
@@ -1232,8 +1561,16 @@ fn word_at(line: &str, col: usize) -> Option<String> {
     if !is_word(bytes[col]) {
         return None;
     }
-    let start = (0..col).rev().take_while(|&i| is_word(bytes[i])).last().unwrap_or(col);
-    let end = (col..bytes.len()).take_while(|&i| is_word(bytes[i])).last().unwrap_or(col) + 1;
+    let start = (0..col)
+        .rev()
+        .take_while(|&i| is_word(bytes[i]))
+        .last()
+        .unwrap_or(col);
+    let end = (col..bytes.len())
+        .take_while(|&i| is_word(bytes[i]))
+        .last()
+        .unwrap_or(col)
+        + 1;
     Some(line[start..end].to_string())
 }
 
@@ -1249,15 +1586,19 @@ fn path_to_uri(path: &std::path::Path) -> Option<Uri> {
 fn find_workspace_root(file_path: &std::path::Path) -> Option<PathBuf> {
     let mut dir = file_path.parent()?;
     loop {
-        let has_axis = std::fs::read_dir(dir).ok()?.flatten().any(|e| {
-            e.path().extension().is_some_and(|ext| ext == "axis")
-        });
+        let has_axis = std::fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .any(|e| e.path().extension().is_some_and(|ext| ext == "axis"));
         if has_axis {
             if let Some(parent) = dir.parent() {
-                let parent_has_axis = std::fs::read_dir(parent).ok()
-                    .map(|entries| entries.flatten().any(|e| {
-                        e.path().extension().is_some_and(|ext| ext == "axis")
-                    }))
+                let parent_has_axis = std::fs::read_dir(parent)
+                    .ok()
+                    .map(|entries| {
+                        entries
+                            .flatten()
+                            .any(|e| e.path().extension().is_some_and(|ext| ext == "axis"))
+                    })
                     .unwrap_or(false);
                 if parent_has_axis {
                     dir = parent;
@@ -1313,7 +1654,12 @@ mod tests {
 
     #[test]
     fn test_span_to_range() {
-        let span = crate::token::Span { offset: 0, len: 5, line: 1, col: 0 };
+        let span = crate::token::Span {
+            offset: 0,
+            len: 5,
+            line: 1,
+            col: 0,
+        };
         let range = span_to_range(span);
         assert_eq!(range.start.line, 0);
         assert_eq!(range.start.character, 0);
@@ -1323,7 +1669,9 @@ mod tests {
     #[test]
     fn test_error_position_lex() {
         let e = crate::error::AxisError::LexError {
-            line: 3, col: 5, message: "bad token".into(),
+            line: 3,
+            col: 5,
+            message: "bad token".into(),
         };
         let (l, c, m) = error_position(&e);
         assert_eq!(l, 3);
@@ -1352,7 +1700,10 @@ mod tests {
 
     #[test]
     fn test_format_type_enum() {
-        assert_eq!(format_type(&ast::TypeExpr::Enum(vec!["a".into(), "b".into()])), "ENUM(a, b)");
+        assert_eq!(
+            format_type(&ast::TypeExpr::Enum(vec!["a".into(), "b".into()])),
+            "ENUM(a, b)"
+        );
     }
 
     #[test]
@@ -1362,31 +1713,46 @@ mod tests {
 
     #[test]
     fn test_format_type_list() {
-        assert_eq!(format_type(&ast::TypeExpr::List(Box::new(ast::TypeExpr::Uuid))), "LIST UUID");
+        assert_eq!(
+            format_type(&ast::TypeExpr::List(Box::new(ast::TypeExpr::Uuid))),
+            "LIST UUID"
+        );
     }
 
     #[test]
     fn test_reference_context_fetch() {
         let src = "FLOW get get /u\n  FETCH users\n";
-        assert!(matches!(reference_context(src, 1, "users"), RefContext::SourceName));
+        assert!(matches!(
+            reference_context(src, 1, "users"),
+            RefContext::SourceName
+        ));
     }
 
     #[test]
     fn test_reference_context_realm() {
         let src = "FLOW get get /u\n  REALM api\n";
-        assert!(matches!(reference_context(src, 1, "api"), RefContext::RealmName));
+        assert!(matches!(
+            reference_context(src, 1, "api"),
+            RefContext::RealmName
+        ));
     }
 
     #[test]
     fn test_reference_context_shape_header() {
         let src = "SOURCE users POSTGRES\n  SHAPE User\n";
-        assert!(matches!(reference_context(src, 1, "User"), RefContext::ShapeName));
+        assert!(matches!(
+            reference_context(src, 1, "User"),
+            RefContext::ShapeName
+        ));
     }
 
     #[test]
     fn test_reference_context_route() {
         let src = "SURFACE pub v1\n  ROUTE GET /u -> list\n";
-        assert!(matches!(reference_context(src, 1, "list"), RefContext::FlowName));
+        assert!(matches!(
+            reference_context(src, 1, "list"),
+            RefContext::FlowName
+        ));
     }
 
     #[test]
@@ -1400,7 +1766,8 @@ mod tests {
 
     #[test]
     fn test_find_construct_source() {
-        let src = "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
+        let src =
+            "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
         let program = project::compile_source(src).unwrap();
         let span = find_construct_span(&program, "users", ConstructKind::Source);
         assert!(span.is_some());
@@ -1428,20 +1795,29 @@ FLOW get get /users/:id
   RETURN 200 user
 "#;
         let program = project::compile_source(src).unwrap();
-        let flow = program.constructs.iter().find(|c| matches!(c, Construct::Flow(_))).unwrap();
+        let flow = program
+            .constructs
+            .iter()
+            .find(|c| matches!(c, Construct::Flow(_)))
+            .unwrap();
         let refs = collect_references(flow, "users");
         assert!(!refs.is_empty());
     }
 
     #[test]
     fn test_document_symbols() {
-        let src = "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
+        let src =
+            "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
         let program = project::compile_source(src).unwrap();
-        let symbols: Vec<_> = program.constructs.iter().map(|c| match c {
-            Construct::Shape(s) => s.name.clone(),
-            Construct::Source(s) => s.name.clone(),
-            _ => String::new(),
-        }).collect();
+        let symbols: Vec<_> = program
+            .constructs
+            .iter()
+            .map(|c| match c {
+                Construct::Shape(s) => s.name.clone(),
+                Construct::Source(s) => s.name.clone(),
+                _ => String::new(),
+            })
+            .collect();
         assert!(symbols.contains(&"User".to_string()));
         assert!(symbols.contains(&"users".to_string()));
     }
@@ -1458,17 +1834,35 @@ FLOW get get /users/:id
     #[test]
     fn test_span_in_source() {
         let src = "line 1\nline 2\nline 3\n";
-        let span = crate::token::Span { offset: 0, len: 5, line: 2, col: 0 };
+        let span = crate::token::Span {
+            offset: 0,
+            len: 5,
+            line: 2,
+            col: 0,
+        };
         assert!(span_in_source(span, src));
-        let span_out = crate::token::Span { offset: 0, len: 5, line: 10, col: 0 };
+        let span_out = crate::token::Span {
+            offset: 0,
+            len: 5,
+            line: 10,
+            col: 0,
+        };
         assert!(!span_in_source(span_out, src));
     }
 
     #[test]
     fn test_cross_file_definition() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n").unwrap();
-        std::fs::write(tmp.join("sources.axis"), "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n").unwrap();
+        std::fs::write(
+            tmp.join("shapes.axis"),
+            "SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.join("sources.axis"),
+            "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n",
+        )
+        .unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());
@@ -1486,7 +1880,11 @@ FLOW get get /users/:id
     fn test_cross_file_references() {
         let tmp = tempdir();
         std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n").unwrap();
-        std::fs::write(tmp.join("sources.axis"), "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n").unwrap();
+        std::fs::write(
+            tmp.join("sources.axis"),
+            "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n",
+        )
+        .unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());
@@ -1500,7 +1898,11 @@ FLOW get get /users/:id
     fn test_cross_file_merged_program() {
         let tmp = tempdir();
         std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n").unwrap();
-        std::fs::write(tmp.join("sources.axis"), "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n").unwrap();
+        std::fs::write(
+            tmp.join("sources.axis"),
+            "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n",
+        )
+        .unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());
@@ -1510,13 +1912,17 @@ FLOW get get /users/:id
     }
 
     #[test]
+    #[allow(clippy::mutable_key_type)] // lsp_types::Uri is required by the workspace index API.
     fn test_index_prefers_open_docs() {
         let tmp = tempdir();
         std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n").unwrap();
 
         let uri = path_to_uri(&tmp.join("shapes.axis")).unwrap();
         let mut open = HashMap::new();
-        open.insert(uri, "SHAPE User\n  id UUID PK AUTO\n  email STRING 255 REQUIRED\n".to_string());
+        open.insert(
+            uri,
+            "SHAPE User\n  id UUID PK AUTO\n  email STRING 255 REQUIRED\n".to_string(),
+        );
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &open);
@@ -1532,7 +1938,11 @@ FLOW get get /users/:id
     #[test]
     fn test_cross_file_find_any() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("realms.axis"), "REALM api\n  CAPABILITY read users\n").unwrap();
+        std::fs::write(
+            tmp.join("realms.axis"),
+            "REALM api\n  CAPABILITY read users\n",
+        )
+        .unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());
@@ -1571,36 +1981,63 @@ FLOW get get /users/:id
 
     #[test]
     fn test_construct_identity_by_name() {
-        let src = "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
+        let src =
+            "SHAPE User\n  id UUID PK AUTO\n\nSOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n";
         let program = project::compile_source(src).unwrap();
-        assert_eq!(construct_identity_by_name(&program, "User"), Some(ConstructKind::Shape));
-        assert_eq!(construct_identity_by_name(&program, "users"), Some(ConstructKind::Source));
+        assert_eq!(
+            construct_identity_by_name(&program, "User"),
+            Some(ConstructKind::Shape)
+        );
+        assert_eq!(
+            construct_identity_by_name(&program, "users"),
+            Some(ConstructKind::Source)
+        );
         assert_eq!(construct_identity_by_name(&program, "nope"), None);
     }
 
     #[test]
     fn test_construct_kind_to_symbol() {
-        assert_eq!(construct_kind_to_symbol(ConstructKind::Shape), SymbolKind::STRUCT);
-        assert_eq!(construct_kind_to_symbol(ConstructKind::Flow), SymbolKind::FUNCTION);
-        assert_eq!(construct_kind_to_symbol(ConstructKind::Realm), SymbolKind::MODULE);
-        assert_eq!(construct_kind_to_symbol(ConstructKind::Service), SymbolKind::CLASS);
+        assert_eq!(
+            construct_kind_to_symbol(ConstructKind::Shape),
+            SymbolKind::STRUCT
+        );
+        assert_eq!(
+            construct_kind_to_symbol(ConstructKind::Flow),
+            SymbolKind::FUNCTION
+        );
+        assert_eq!(
+            construct_kind_to_symbol(ConstructKind::Realm),
+            SymbolKind::MODULE
+        );
+        assert_eq!(
+            construct_kind_to_symbol(ConstructKind::Service),
+            SymbolKind::CLASS
+        );
     }
 
     #[test]
     fn test_workspace_symbol_filtering() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n\nSHAPE Order\n  id UUID PK AUTO\n").unwrap();
+        std::fs::write(
+            tmp.join("shapes.axis"),
+            "SHAPE User\n  id UUID PK AUTO\n\nSHAPE Order\n  id UUID PK AUTO\n",
+        )
+        .unwrap();
         std::fs::write(tmp.join("flows.axis"), "FLOW get_user get /users/:id\n  AUTH session\n  LET u\n    FETCH users\n      FILTER id EQ path.id\n    OR 404\n  RETURN 200 u\n").unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());
 
-        let all_entries: Vec<_> = index.entries.iter()
+        let all_entries: Vec<_> = index
+            .entries
+            .iter()
             .filter(|e| e.name.to_lowercase().contains("user"))
             .collect();
         assert!(all_entries.len() >= 2);
 
-        let shapes: Vec<_> = index.entries.iter()
+        let shapes: Vec<_> = index
+            .entries
+            .iter()
             .filter(|e| e.kind == ConstructKind::Shape)
             .collect();
         assert_eq!(shapes.len(), 2);
@@ -1619,21 +2056,40 @@ FLOW get get /users/:id
 
     #[test]
     fn test_completion_context_fetch() {
-        assert!(matches!(completion_context("FETCH users"), CompletionContext::SourceName));
-        assert!(matches!(completion_context("QUERY users"), CompletionContext::SourceName));
-        assert!(matches!(completion_context("INSERT orders"), CompletionContext::SourceName));
-        assert!(matches!(completion_context("FILTER id EQ"), CompletionContext::FieldName));
+        assert!(matches!(
+            completion_context("FETCH users"),
+            CompletionContext::SourceName
+        ));
+        assert!(matches!(
+            completion_context("QUERY users"),
+            CompletionContext::SourceName
+        ));
+        assert!(matches!(
+            completion_context("INSERT orders"),
+            CompletionContext::SourceName
+        ));
+        assert!(matches!(
+            completion_context("FILTER id EQ"),
+            CompletionContext::FieldName
+        ));
     }
 
     #[test]
     fn test_completion_context_realm() {
-        assert!(matches!(completion_context("REALM api"), CompletionContext::RealmName));
+        assert!(matches!(
+            completion_context("REALM api"),
+            CompletionContext::RealmName
+        ));
     }
 
     #[test]
     fn test_workspace_completions_shapes() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n\nSHAPE Order\n  id UUID PK AUTO\n").unwrap();
+        std::fs::write(
+            tmp.join("shapes.axis"),
+            "SHAPE User\n  id UUID PK AUTO\n\nSHAPE Order\n  id UUID PK AUTO\n",
+        )
+        .unwrap();
 
         let mut state = ServerState::new();
         state.workspace_root = Some(tmp.clone());
@@ -1648,7 +2104,11 @@ FLOW get get /users/:id
     #[test]
     fn test_workspace_completions_sources() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("sources.axis"), "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n").unwrap();
+        std::fs::write(
+            tmp.join("sources.axis"),
+            "SOURCE users POSTGRES\n  SHAPE User\n  INDEX id\n",
+        )
+        .unwrap();
 
         let mut state = ServerState::new();
         state.workspace_root = Some(tmp.clone());
@@ -1662,7 +2122,11 @@ FLOW get get /users/:id
     #[test]
     fn test_field_completions() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("shapes.axis"), "SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n  email STRING 200\n").unwrap();
+        std::fs::write(
+            tmp.join("shapes.axis"),
+            "SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n  email STRING 200\n",
+        )
+        .unwrap();
 
         let mut state = ServerState::new();
         state.workspace_root = Some(tmp.clone());
@@ -1678,7 +2142,11 @@ FLOW get get /users/:id
     #[test]
     fn test_stream_construct_kind() {
         let tmp = tempdir();
-        std::fs::write(tmp.join("stream.axis"), "STREAM updates ws /ws/updates\n  EVENT user_online\n    user_id UUID\n").unwrap();
+        std::fs::write(
+            tmp.join("stream.axis"),
+            "STREAM updates ws /ws/updates\n  EVENT user_online\n    user_id UUID\n",
+        )
+        .unwrap();
 
         let mut index = WorkspaceIndex::new();
         index.rebuild(&tmp, &HashMap::new());

@@ -57,8 +57,8 @@ SHAPE SOURCE REALM FLOW SAGA SURFACE MIGRATE POLICY SERVICE
 
 Flow keywords:
 ```
-AUTH BODY PARAM HEADER RULE GUARD LET FETCH QUERY INSERT UPDATE DELETE
-CALL EFFECT MATCH WHEN DEFAULT RETURN LIMIT CACHE SCOPE REQUIRE
+AUTH BODY PARAM HEADER IDEMPOTENCY RULE GUARD LET FETCH QUERY INSERT UPSERT UPDATE DELETE FANOUT
+CALL EFFECT MATCH WHEN DEFAULT RETURN LIMIT CACHE SCOPE REQUIRE KEY
 ```
 
 Expression keywords:
@@ -86,8 +86,8 @@ Other keywords:
 ```
 INDEX TENANT CAPABILITY FIELD HIDE EXPOSE DEPRECATE ROUTE
 STEP VERIFY COMPENSATE YIELD ON_SUCCESS ON_FAILURE RUN_COMPENSATIONS
-TEMPLATE DATA TASK APPLIES_TO WRITES READS METHOD WHERE SET
-COPY COMPUTE DROP ANY NONE TRUE FALSE
+TEMPLATE DATA TASK APPLIES_TO ALL ANY WRITES READS METHOD WHERE SET
+COPY COMPUTE DROP NONE TRUE FALSE
 HASH ASYNC WEBHOOK SIGNATURE HMAC
 ITEMS TOTAL NEXT_CURSOR HAS_MORE
 ```
@@ -180,7 +180,7 @@ Field modifiers:
 
 ### 5.2 SOURCE
 
-Maps a shape to a physical datastore. Every QUERY/FETCH/INSERT/UPDATE/DELETE targets a source, not a shape.
+Maps a shape to a physical datastore. Every QUERY/FETCH/INSERT/UPSERT/UPDATE/DELETE/FANOUT targets a source, not a shape.
 
 ```axis
 SOURCE bookings POSTGRES
@@ -236,7 +236,7 @@ REALM booking_api
 
 `TENANT field` declares the row-level isolation field. See §7.12 SCOPE.
 
-`CAPABILITY` declarations whitelist operations. A FLOW in this realm can only access what is listed. The compiler rejects any FETCH/QUERY/INSERT/UPDATE/DELETE/CALL/EFFECT that lacks a matching capability.
+`CAPABILITY` declarations whitelist operations. A FLOW in this realm can only access what is listed. The compiler rejects any FETCH/QUERY/INSERT/UPSERT/UPDATE/DELETE/FANOUT/CALL/EFFECT that lacks a matching capability.
 
 Capability types:
 - `read source_name` — FETCH and QUERY
@@ -254,18 +254,15 @@ POLICY require_auth
   REQUIRE AUTH
 
 POLICY require_rate_limit_on_writes
-  APPLIES_TO FLOW
-    WHERE METHOD IN POST PUT PATCH DELETE
+  APPLIES_TO FLOW WHERE METHOD IN post put patch delete
   REQUIRE LIMIT
 
 POLICY require_fraud_check_on_bookings
-  APPLIES_TO FLOW
-    WHERE WRITES bookings
+  APPLIES_TO FLOW WHERE WRITES bookings
   REQUIRE RULE fraud_score_ok
 
 POLICY require_tenant_scope
-  APPLIES_TO FLOW
-    WHERE READS bookings
+  APPLIES_TO FLOW WHERE READS bookings
   REQUIRE SCOPE
 ```
 
@@ -273,8 +270,11 @@ POLICY require_tenant_scope
 - `FLOW` — all flows in the realm.
 - `FLOW WHERE METHOD IN ...` — flows with matching HTTP methods.
 - `FLOW WHERE READS source` — flows that FETCH or QUERY the source.
-- `FLOW WHERE WRITES source` — flows that INSERT/UPDATE/DELETE the source.
+- `FLOW WHERE WRITES source` — flows that INSERT/UPSERT/UPDATE/DELETE/FANOUT the source.
 - `FLOW WHERE PATH STARTS_WITH "/admin"` — flows with matching paths.
+- `FLOW ALL` followed by an indented selector block — every selector must match.
+- `FLOW ANY` followed by an indented selector block — at least one selector must match.
+- `NOT` before a block selector — negates that selector.
 
 `REQUIRE` clauses:
 - `REQUIRE AUTH` — flow must have an AUTH declaration.
@@ -283,6 +283,8 @@ POLICY require_tenant_scope
 - `REQUIRE SCOPE` — flow must have a SCOPE tenant declaration.
 - `REQUIRE RULE rule_name` — flow must include the named rule.
 - `REQUIRE GUARD guard_name` — flow must include the named guard.
+- `REQUIRE IDEMPOTENCY` — flow must declare atomic idempotency.
+- `REQUIRE FANOUT` — flow must contain a FANOUT operation.
 
 The compiler evaluates all policies before code generation. Violations list the policy name, the flow name, and what is missing.
 
@@ -318,6 +320,7 @@ SERVICE geocoding
   AUTH query_param VAULT google_maps_key
 
   METHOD reverse
+    PURE
     INPUT lat DECIMAL lng DECIMAL
     OUTPUT address STRING city STRING country STRING
     TIMEOUT 5s
@@ -329,6 +332,8 @@ Service declarations specify:
 - `ENDPOINT name` — logical name resolved to a URL by runtime config.
 - `AUTH type VAULT key_name` — auth method. `bearer`, `basic`, `query_param`, `header`. Secret resolved from vault at runtime.
 - `METHOD name` — an operation the LLM can invoke via `CALL service.method`.
+- `PURE` — the method is side-effect-free and repeatable, so retrying an idempotent transaction cannot duplicate external effects.
+- `IDEMPOTENCY input_name` — an effectful provider durably deduplicates on this STRING, TEXT, or UUID input. An idempotent flow must bind it directly to its own exact key.
 - `INPUT` / `OUTPUT` — typed signatures. The compiler type-checks CALL arguments and YIELD bindings.
 - `TIMEOUT` — per-call timeout. Runtime enforces.
 - `RETRY count backoff strategy` — retry policy. `exponential`, `linear`, `none`.
@@ -347,11 +352,12 @@ FLOW <name> <method> <path>
   [BODY ...]
   [PARAM ...]
   [HEADER ...]
+  [IDEMPOTENCY key_path SCOPE scope_path TTL seconds]
   [RULE ...]
   [GUARD ...]
   [LET ...]
   [FETCH/QUERY ...]
-  [INSERT/UPDATE/DELETE ...]
+  [INSERT/UPSERT/UPDATE/DELETE/FANOUT ...]
   [CALL ...]
   [MATCH ...]
   [EFFECT ...]
@@ -361,14 +367,16 @@ FLOW <name> <method> <path>
 Methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WEBHOOK`.
 
 Ordering rules (compiler-enforced):
-1. Declaration block: AUTH, LIMIT, SCOPE, BODY, PARAM, HEADER (any order)
+1. Declaration block: AUTH, LIMIT, SCOPE, BODY, PARAM, HEADER, IDEMPOTENCY (any order)
 2. Validation block: RULE, GUARD (must precede mutations)
 3. Computation block: LET, FETCH, QUERY, CALL, MATCH (topological order — can only reference earlier bindings)
-4. Mutation block: INSERT, UPDATE, DELETE (after all validations)
+4. Mutation block: INSERT, UPSERT, UPDATE, DELETE, FANOUT (after all validations)
 5. Effect block: EFFECT (after mutations)
 6. Return: RETURN (exactly one, always last)
 
 Violations of this ordering are compile errors. This prevents side effects before validation — a structural guarantee, not a convention.
+
+`UPSERT` requires KEY fields that exactly match a primary key or declared UNIQUE index. `FANOUT` accepts a typed LIST and emits one bulk INSERT statement. `IDEMPOTENCY` reserves `(flow, scope, key)`, executes all SQL and outbox writes, stores the response, and commits them as one transaction. Identical retries replay the exact committed response; a different request with the same key returns 409. Idempotent flows cannot span physical databases or SQL dialects and cannot contain TRY or UPLOAD. Direct service calls must be `PURE` or declare provider `IDEMPOTENCY` and receive the exact flow key.
 
 ### 5.7 SAGA
 
@@ -799,7 +807,7 @@ The compiler type-checks arguments against the SERVICE METHOD INPUT declaration.
 
 ### 6.9 EFFECT
 
-Asynchronous side effects. Executed after the flow's DB transaction commits. Fire-and-forget from the flow's perspective; the runtime guarantees at-least-once delivery.
+Asynchronous side effects are appended to the durable outbox inside the flow's database transaction. Workers deliver committed records with retries; no external effect becomes visible for a rolled-back transaction.
 
 ```axis
 EFFECT email
@@ -1146,8 +1154,11 @@ policy          = "POLICY" IDENT NL INDENT
                     applies_to
                     { require_clause }
                   DEDENT ;
-applies_to      = "APPLIES_TO" "FLOW" [ policy_filter ] NL ;
-policy_filter   = "WHERE" policy_cond { policy_cond } ;
+applies_to      = "APPLIES_TO" "FLOW"
+                  ( [ "WHERE" policy_cond { policy_cond } ] NL
+                  | ( "ALL" | "ANY" ) NL INDENT
+                      { [ "NOT" ] policy_cond NL }
+                    DEDENT ) ;
 policy_cond     = "METHOD" "IN" IDENT { IDENT }
                 | "READS" IDENT
                 | "WRITES" IDENT
@@ -1157,7 +1168,9 @@ require_target  = "AUTH" [ "ROLE" IDENT ]
                 | "LIMIT"
                 | "SCOPE"
                 | "RULE" IDENT
-                | "GUARD" IDENT ;
+                | "GUARD" IDENT
+                | "IDEMPOTENCY"
+                | "FANOUT" ;
 
 (* --- Services --- *)
 service         = "SERVICE" IDENT NL INDENT
@@ -1170,6 +1183,7 @@ method_def      = "METHOD" IDENT NL INDENT
                     "INPUT" { IDENT type_expr } NL
                     "OUTPUT" { IDENT type_expr } NL
                     [ "TIMEOUT" duration NL ]
+                    [ "PURE" NL ]
                     [ "RETRY" INT_LIT "backoff" retry_strat NL ]
                     [ "CACHE" INT_LIT NL ]
                   DEDENT ;
@@ -1185,7 +1199,7 @@ flow            = "FLOW" IDENT http_method PATH NL INDENT
                   DEDENT ;
 http_method     = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "WEBHOOK" ;
 flow_decl       = auth_decl | limit_decl | scope_decl
-                | body_decl | param_decl | header_decl ;
+                | body_decl | param_decl | header_decl | idempotency_decl ;
 auth_decl       = "AUTH" auth_spec NL ;
 auth_spec       = "none" | "session" | "bearer" | "api_key"
                 | "role" IDENT
@@ -1198,10 +1212,11 @@ scope_decl      = "SCOPE" "TENANT" ( dot_path | "ANY" ) NL ;
 body_decl       = "BODY" SHAPE_NAME NL INDENT { field_def } DEDENT ;
 param_decl      = "PARAM" IDENT type_expr { modifier } NL ;
 header_decl     = "HEADER" IDENT type_expr { modifier } NL ;
+idempotency_decl = "IDEMPOTENCY" dot_path "SCOPE" dot_path "TTL" INT_LIT NL ;
 
 flow_step       = rule_step | guard_step | let_step
                 | fetch_step | query_step
-                | insert_step | update_step | delete_step
+                | insert_step | upsert_step | update_step | delete_step | fanout_step
                 | call_step | effect_step | match_step ;
 
 rule_step       = "RULE" IDENT NL INDENT { require_line } DEDENT ;
@@ -1237,6 +1252,16 @@ insert_step     = "INSERT" IDENT NL INDENT
                     { IDENT expr NL }
                   DEDENT
                   [ "AS" IDENT NL ] ;
+
+upsert_step     = "UPSERT" IDENT NL INDENT
+                    { "KEY" IDENT expr NL }
+                    { "SET" IDENT expr NL }
+                  DEDENT
+                  [ "AS" IDENT NL ] ;
+
+fanout_step     = "FANOUT" IDENT "IN" expr NL INDENT
+                    insert_step
+                  DEDENT ;
 
 update_step     = "UPDATE" IDENT NL INDENT
                     { where_clause }
@@ -1397,7 +1422,7 @@ Type checking and semantic analysis.
 
 **Capability check:**
 - Every FETCH/QUERY on source S requires `CAPABILITY read S` in the flow's realm.
-- Every INSERT/UPDATE/DELETE on source S requires `CAPABILITY write S`.
+- Every INSERT/UPSERT/UPDATE/DELETE/FANOUT on source S requires `CAPABILITY write S`.
 - Every CALL to service S requires `CAPABILITY call S`.
 - Every EFFECT of type T requires `CAPABILITY effect T`.
 
@@ -1512,7 +1537,7 @@ HTTP Request
   ├─ [8] Execute ──────── LET bindings, FETCH, QUERY, CALL, MATCH
   │                       DB transaction opened on first mutation
   │
-  ├─ [9] Mutate ───────── INSERT/UPDATE/DELETE within transaction
+  ├─ [9] Mutate ───────── INSERT/UPSERT/UPDATE/DELETE/FANOUT within transaction
   │                       Effects written to outbox within same transaction
   │                       Transaction committed
   │
@@ -1798,7 +1823,7 @@ The compiler generates property tests from type signatures and constraints:
 - **Type invariant**: For all valid inputs matching the BODY schema, the response matches the RETURN shape or is a declared error code.
 - **Auth invariant**: Requests without valid auth receive 401 or 403, never 2xx.
 - **Tenant invariant**: A request with SCOPE TENANT user_A never returns data where tenant_field ≠ user_A.
-- **Idempotency**: For INSERT flows with HEADER idempotency_key, duplicate requests return the same response.
+- **Idempotency**: For flows with IDEMPOTENCY, concurrent identical requests execute once and return the same committed status, body, and headers; key reuse with different input returns 409.
 - **Guard invariant**: For inputs that violate a GUARD condition, the response is the GUARD's error code.
 
 ### 12.2 Trace Replay

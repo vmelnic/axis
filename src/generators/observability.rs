@@ -79,7 +79,12 @@ pub fn generate_observability(program: &Program) -> ObservabilitySchema {
                 }
             }
             Construct::Flow(f) => {
-                collect_flow_observability(f, &mut sources_seen, &mut services_seen, &mut effects_seen);
+                collect_flow_observability(
+                    f,
+                    &mut sources_seen,
+                    &mut services_seen,
+                    &mut effects_seen,
+                );
             }
             Construct::Saga(_) => {
                 has_saga = true;
@@ -157,13 +162,34 @@ pub fn generate_observability(program: &Program) -> ObservabilitySchema {
     let root_span = SpanSchema {
         name: "axis.request".into(),
         attributes: vec![
-            SpanAttribute { key: "flow".into(), value_type: "string".into() },
-            SpanAttribute { key: "method".into(), value_type: "string".into() },
-            SpanAttribute { key: "path".into(), value_type: "string".into() },
-            SpanAttribute { key: "surface".into(), value_type: "string".into() },
-            SpanAttribute { key: "auth.user_id".into(), value_type: "string".into() },
-            SpanAttribute { key: "tenant".into(), value_type: "string".into() },
-            SpanAttribute { key: "response.code".into(), value_type: "int".into() },
+            SpanAttribute {
+                key: "flow".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "method".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "path".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "surface".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "auth.user_id".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "tenant".into(),
+                value_type: "string".into(),
+            },
+            SpanAttribute {
+                key: "response.code".into(),
+                value_type: "int".into(),
+            },
         ],
     };
 
@@ -171,44 +197,81 @@ pub fn generate_observability(program: &Program) -> ObservabilitySchema {
         SpanSchema {
             name: "axis.guard".into(),
             attributes: vec![
-                SpanAttribute { key: "guard.name".into(), value_type: "string".into() },
-                SpanAttribute { key: "guard.result".into(), value_type: "string".into() },
+                SpanAttribute {
+                    key: "guard.name".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "guard.result".into(),
+                    value_type: "string".into(),
+                },
             ],
         },
         SpanSchema {
             name: "axis.fetch".into(),
             attributes: vec![
-                SpanAttribute { key: "source".into(), value_type: "string".into() },
-                SpanAttribute { key: "result".into(), value_type: "string".into() },
-                SpanAttribute { key: "index_used".into(), value_type: "string".into() },
+                SpanAttribute {
+                    key: "source".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "result".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "index_used".into(),
+                    value_type: "string".into(),
+                },
             ],
         },
         SpanSchema {
             name: "axis.query".into(),
             attributes: vec![
-                SpanAttribute { key: "source".into(), value_type: "string".into() },
-                SpanAttribute { key: "rows_returned".into(), value_type: "int".into() },
-                SpanAttribute { key: "index_used".into(), value_type: "string".into() },
+                SpanAttribute {
+                    key: "source".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "rows_returned".into(),
+                    value_type: "int".into(),
+                },
+                SpanAttribute {
+                    key: "index_used".into(),
+                    value_type: "string".into(),
+                },
             ],
         },
         SpanSchema {
             name: "axis.insert".into(),
-            attributes: vec![
-                SpanAttribute { key: "source".into(), value_type: "string".into() },
-            ],
+            attributes: vec![SpanAttribute {
+                key: "source".into(),
+                value_type: "string".into(),
+            }],
         },
         SpanSchema {
             name: "axis.update".into(),
             attributes: vec![
-                SpanAttribute { key: "source".into(), value_type: "string".into() },
-                SpanAttribute { key: "rows_affected".into(), value_type: "int".into() },
+                SpanAttribute {
+                    key: "source".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "rows_affected".into(),
+                    value_type: "int".into(),
+                },
             ],
         },
         SpanSchema {
             name: "axis.delete".into(),
             attributes: vec![
-                SpanAttribute { key: "source".into(), value_type: "string".into() },
-                SpanAttribute { key: "rows_affected".into(), value_type: "int".into() },
+                SpanAttribute {
+                    key: "source".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "rows_affected".into(),
+                    value_type: "int".into(),
+                },
             ],
         },
     ];
@@ -217,9 +280,18 @@ pub fn generate_observability(program: &Program) -> ObservabilitySchema {
         child_spans.push(SpanSchema {
             name: "axis.call".into(),
             attributes: vec![
-                SpanAttribute { key: "service".into(), value_type: "string".into() },
-                SpanAttribute { key: "method".into(), value_type: "string".into() },
-                SpanAttribute { key: "status".into(), value_type: "string".into() },
+                SpanAttribute {
+                    key: "service".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "method".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "status".into(),
+                    value_type: "string".into(),
+                },
             ],
         });
     }
@@ -228,31 +300,91 @@ pub fn generate_observability(program: &Program) -> ObservabilitySchema {
         child_spans.push(SpanSchema {
             name: "axis.effect".into(),
             attributes: vec![
-                SpanAttribute { key: "type".into(), value_type: "string".into() },
-                SpanAttribute { key: "template".into(), value_type: "string".into() },
-                SpanAttribute { key: "queued".into(), value_type: "bool".into() },
+                SpanAttribute {
+                    key: "type".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "template".into(),
+                    value_type: "string".into(),
+                },
+                SpanAttribute {
+                    key: "queued".into(),
+                    value_type: "bool".into(),
+                },
             ],
         });
     }
 
     let log_fields = vec![
-        LogField { field: "trace_id".into(), value_type: "string".into(), source: "generated".into() },
-        LogField { field: "flow".into(), value_type: "string".into(), source: "request".into() },
-        LogField { field: "surface".into(), value_type: "string".into(), source: "routing".into() },
-        LogField { field: "method".into(), value_type: "string".into(), source: "request".into() },
-        LogField { field: "path".into(), value_type: "string".into(), source: "request".into() },
-        LogField { field: "auth.user_id".into(), value_type: "string".into(), source: "auth".into() },
-        LogField { field: "auth.role".into(), value_type: "string".into(), source: "auth".into() },
-        LogField { field: "tenant".into(), value_type: "string".into(), source: "scope".into() },
-        LogField { field: "duration_ms".into(), value_type: "int".into(), source: "timing".into() },
-        LogField { field: "response.code".into(), value_type: "int".into(), source: "response".into() },
-        LogField { field: "steps".into(), value_type: "array".into(), source: "execution".into() },
-        LogField { field: "queries".into(), value_type: "array".into(), source: "execution".into() },
+        LogField {
+            field: "trace_id".into(),
+            value_type: "string".into(),
+            source: "generated".into(),
+        },
+        LogField {
+            field: "flow".into(),
+            value_type: "string".into(),
+            source: "request".into(),
+        },
+        LogField {
+            field: "surface".into(),
+            value_type: "string".into(),
+            source: "routing".into(),
+        },
+        LogField {
+            field: "method".into(),
+            value_type: "string".into(),
+            source: "request".into(),
+        },
+        LogField {
+            field: "path".into(),
+            value_type: "string".into(),
+            source: "request".into(),
+        },
+        LogField {
+            field: "auth.user_id".into(),
+            value_type: "string".into(),
+            source: "auth".into(),
+        },
+        LogField {
+            field: "auth.role".into(),
+            value_type: "string".into(),
+            source: "auth".into(),
+        },
+        LogField {
+            field: "tenant".into(),
+            value_type: "string".into(),
+            source: "scope".into(),
+        },
+        LogField {
+            field: "duration_ms".into(),
+            value_type: "int".into(),
+            source: "timing".into(),
+        },
+        LogField {
+            field: "response.code".into(),
+            value_type: "int".into(),
+            source: "response".into(),
+        },
+        LogField {
+            field: "steps".into(),
+            value_type: "array".into(),
+            source: "execution".into(),
+        },
+        LogField {
+            field: "queries".into(),
+            value_type: "array".into(),
+            source: "execution".into(),
+        },
     ];
 
     ObservabilitySchema {
         metrics,
-        trace_schema: TraceSchema { root_span, child_spans },
+        trace_schema: TraceSchema {
+            root_span,
+            child_spans,
+        },
         log_fields,
     }
 }
@@ -276,10 +408,24 @@ fn collect_step_deps(
 ) {
     match step {
         FlowStep::Let(l) => collect_expr_deps(&l.expr, sources, services),
-        FlowStep::Insert(i) => { sources.insert(i.source.clone()); }
-        FlowStep::Update(u) => { sources.insert(u.source.clone()); }
-        FlowStep::Delete(d) => { sources.insert(d.source.clone()); }
-        FlowStep::Effect(e) => { effects.insert(format!("{:?}", e.kind).to_lowercase()); }
+        FlowStep::Insert(i) => {
+            sources.insert(i.source.clone());
+        }
+        FlowStep::Upsert(u) => {
+            sources.insert(u.source.clone());
+        }
+        FlowStep::Update(u) => {
+            sources.insert(u.source.clone());
+        }
+        FlowStep::Delete(d) => {
+            sources.insert(d.source.clone());
+        }
+        FlowStep::Fanout(f) => {
+            sources.insert(f.insert.source.clone());
+        }
+        FlowStep::Effect(e) => {
+            effects.insert(format!("{:?}", e.kind).to_lowercase());
+        }
         FlowStep::Match(m) => {
             for branch in &m.branches {
                 for s in &branch.steps {
@@ -357,7 +503,8 @@ mod tests {
 
     #[test]
     fn test_basic_observability() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -376,7 +523,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let schema = generate_observability(&program);
         assert!(schema.metrics.len() >= 3);
         assert_eq!(schema.trace_schema.root_span.name, "axis.request");
@@ -385,7 +533,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_service_metrics() {
-        let program = parse(r#"SHAPE Order
+        let program = parse(
+            r#"SHAPE Order
   id UUID PK AUTO
   total DECIMAL PRECISION 10 SCALE 2
 
@@ -418,15 +567,20 @@ FLOW charge_order post /orders/:id/charge
       amount order.total
     OR 500
   RETURN 200 payment
-"#);
+"#,
+        );
         let schema = generate_observability(&program);
-        let call_metric = schema.metrics.iter().find(|m| m.name == "axis_call_duration_seconds");
+        let call_metric = schema
+            .metrics
+            .iter()
+            .find(|m| m.name == "axis_call_duration_seconds");
         assert!(call_metric.is_some());
     }
 
     #[test]
     fn test_saga_metrics() {
-        let program = parse(r#"SHAPE Order
+        let program = parse(
+            r#"SHAPE Order
   id UUID PK AUTO
   status ENUM pending confirmed
 
@@ -455,15 +609,20 @@ SAGA process POST /orders/process
   ON_FAILURE RUN_COMPENSATIONS
   ON_SUCCESS
     RETURN 200 order
-"#);
+"#,
+        );
         let schema = generate_observability(&program);
-        let saga_metric = schema.metrics.iter().find(|m| m.name == "axis_saga_step_duration_seconds");
+        let saga_metric = schema
+            .metrics
+            .iter()
+            .find(|m| m.name == "axis_saga_step_duration_seconds");
         assert!(saga_metric.is_some());
     }
 
     #[test]
     fn test_prometheus_export() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
 
 SOURCE users POSTGRES
@@ -480,7 +639,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let schema = generate_observability(&program);
         let prom = export_prometheus_config(&schema);
         assert!(prom.contains("# TYPE axis_request_duration_seconds histogram"));
@@ -489,7 +649,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_stream_metrics() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
 
 SOURCE users POSTGRES
@@ -499,11 +660,18 @@ SOURCE users POSTGRES
 STREAM updates ws /ws/updates
   EVENT user_online
     user_id UUID
-"#);
+"#,
+        );
         let schema = generate_observability(&program);
-        let conn_metric = schema.metrics.iter().find(|m| m.name == "axis_stream_connections");
+        let conn_metric = schema
+            .metrics
+            .iter()
+            .find(|m| m.name == "axis_stream_connections");
         assert!(conn_metric.is_some());
-        let msg_metric = schema.metrics.iter().find(|m| m.name == "axis_stream_messages_total");
+        let msg_metric = schema
+            .metrics
+            .iter()
+            .find(|m| m.name == "axis_stream_messages_total");
         assert!(msg_metric.is_some());
     }
 }

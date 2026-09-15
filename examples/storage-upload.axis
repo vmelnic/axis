@@ -1,0 +1,14 @@
+STORAGE attachments
+  BACKEND s3
+  BUCKET "helperbook-attachments"
+  PREFIX originals
+  ACCESS private
+  MAX_SIZE 26214400
+  TYPES image/jpeg image/png application/pdf
+
+FLOW upload_attachment post /attachments
+  BODY MULTIPART AttachmentUpload
+    file BLOB REQUIRED
+  UPLOAD body.file -> attachments AS object_url
+  RETURN 201
+    url object_url

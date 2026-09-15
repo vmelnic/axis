@@ -27,40 +27,86 @@ pub struct MigrationStep {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum MigrationOp {
-    AddColumn { table: String, column: String, column_type: String, nullable: bool },
-    DropColumn { table: String, column: String },
-    RenameColumn { table: String, from: String, to: String },
-    CopyData { fields: Vec<String> },
-    ComputeField { table: String, field: String },
+    AddColumn {
+        table: String,
+        column: String,
+        column_type: String,
+        nullable: bool,
+    },
+    DropColumn {
+        table: String,
+        column: String,
+    },
+    RenameColumn {
+        table: String,
+        from: String,
+        to: String,
+    },
+    CopyData {
+        fields: Vec<String>,
+    },
+    ComputeField {
+        table: String,
+        field: String,
+    },
 }
 
 pub fn plan_migrations(program: &Program) -> MigrationPlan {
-    let sources: Vec<&SourceDef> = program.constructs.iter().filter_map(|c| {
-        if let Construct::Source(s) = c { Some(s) } else { None }
-    }).collect();
+    let sources: Vec<&SourceDef> = program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Source(s) = c {
+                Some(s)
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    let migrates: Vec<&MigrateDef> = program.constructs.iter().filter_map(|c| {
-        if let Construct::Migrate(m) = c { Some(m) } else { None }
-    }).collect();
+    let migrates: Vec<&MigrateDef> = program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Migrate(m) = c {
+                Some(m)
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    let migrations: Vec<MigrationStep> = migrates.iter().enumerate().map(|(i, m)| {
-        let source = sources.iter().find(|s| s.shape == m.shape);
-        let table = source.map(|s| s.name.clone())
-            .unwrap_or_else(|| m.shape.to_lowercase());
-        let stype = source.map(|s| s.source_type).unwrap_or(SourceType::Postgres);
+    let migrations: Vec<MigrationStep> = migrates
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let source = sources.iter().find(|s| s.shape == m.shape);
+            let table = source
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| m.shape.to_lowercase());
+            let stype = source
+                .map(|s| s.source_type)
+                .unwrap_or(SourceType::Postgres);
 
-        let (up, down, operations) = generate_up_down(m, &table, stype);
+            let (up, down, operations) = generate_up_down(m, &table, stype);
 
-        MigrationStep {
-            id: format!("{:04}_{}_{}_to_{}", i + 1, m.shape.to_lowercase(), m.from_version, m.to_version),
-            shape: m.shape.clone(),
-            from_version: m.from_version.clone(),
-            to_version: m.to_version.clone(),
-            up,
-            down,
-            operations,
-        }
-    }).collect();
+            MigrationStep {
+                id: format!(
+                    "{:04}_{}_{}_to_{}",
+                    i + 1,
+                    m.shape.to_lowercase(),
+                    m.from_version,
+                    m.to_version
+                ),
+                shape: m.shape.clone(),
+                from_version: m.from_version.clone(),
+                to_version: m.to_version.clone(),
+                up,
+                down,
+                operations,
+            }
+        })
+        .collect();
 
     let codegen_result = codegen::generate(program);
 
@@ -70,24 +116,51 @@ pub fn plan_migrations(program: &Program) -> MigrationPlan {
     }
 }
 
-fn generate_up_down(m: &MigrateDef, table: &str, stype: SourceType) -> (String, String, Vec<MigrationOp>) {
+fn generate_up_down(
+    m: &MigrateDef,
+    table: &str,
+    stype: SourceType,
+) -> (String, String, Vec<MigrationOp>) {
     let mut up = String::new();
     let mut down = String::new();
     let mut ops = Vec::new();
 
-    writeln!(up, "-- migrate {} from {} to {}", m.shape, m.from_version, m.to_version).unwrap();
+    writeln!(
+        up,
+        "-- migrate {} from {} to {}",
+        m.shape, m.from_version, m.to_version
+    )
+    .unwrap();
     writeln!(up, "BEGIN;").unwrap();
-    writeln!(down, "-- rollback {} from {} to {}", m.shape, m.to_version, m.from_version).unwrap();
+    writeln!(
+        down,
+        "-- rollback {} from {} to {}",
+        m.shape, m.to_version, m.from_version
+    )
+    .unwrap();
     writeln!(down, "BEGIN;").unwrap();
 
     for op in &m.ops {
         match op {
             MigrateOp::Add(field) => {
                 let ty = sql_type(&field.ty, stype);
-                let nullable = !field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+                let nullable = !field
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Required));
                 let null_str = if nullable { "" } else { " NOT NULL" };
-                writeln!(up, "ALTER TABLE {table} ADD COLUMN {} {ty}{null_str};", field.name).unwrap();
-                writeln!(down, "ALTER TABLE {table} DROP COLUMN IF EXISTS {};", field.name).unwrap();
+                writeln!(
+                    up,
+                    "ALTER TABLE {table} ADD COLUMN {} {ty}{null_str};",
+                    field.name
+                )
+                .unwrap();
+                writeln!(
+                    down,
+                    "ALTER TABLE {table} DROP COLUMN IF EXISTS {};",
+                    field.name
+                )
+                .unwrap();
                 ops.push(MigrationOp::AddColumn {
                     table: table.into(),
                     column: field.name.clone(),
@@ -114,7 +187,9 @@ fn generate_up_down(m: &MigrateDef, table: &str, stype: SourceType) -> (String, 
             }
             MigrateOp::Copy(fields) => {
                 writeln!(up, "-- copy fields: {}", fields.join(", ")).unwrap();
-                ops.push(MigrationOp::CopyData { fields: fields.clone() });
+                ops.push(MigrationOp::CopyData {
+                    fields: fields.clone(),
+                });
             }
             MigrateOp::Compute { field, .. } => {
                 writeln!(up, "-- compute field: {field}").unwrap();
@@ -166,7 +241,10 @@ fn sql_type(ty: &TypeExpr, stype: SourceType) -> String {
         (TypeExpr::Json, SourceType::Mysql) => "JSON".into(),
         (TypeExpr::Json, _) => "TEXT".into(),
 
-        (TypeExpr::Enum(variants), _) => format!("VARCHAR({})", variants.iter().map(|v| v.len()).max().unwrap_or(50)),
+        (TypeExpr::Enum(variants), _) => format!(
+            "VARCHAR({})",
+            variants.iter().map(|v| v.len()).max().unwrap_or(50)
+        ),
 
         (TypeExpr::List(inner), SourceType::Postgres) => format!("{}[]", sql_type(inner, stype)),
         (TypeExpr::List(_), SourceType::Mysql) => "JSON".into(),
@@ -189,16 +267,19 @@ fn sql_type(ty: &TypeExpr, stype: SourceType) -> String {
 }
 
 pub fn format_migration_files(plan: &MigrationPlan) -> Vec<(String, String)> {
-    plan.migrations.iter().map(|m| {
-        let filename = format!("{}.sql", m.id);
-        let mut content = String::new();
-        writeln!(content, "-- UP").unwrap();
-        content.push_str(&m.up);
-        writeln!(content).unwrap();
-        writeln!(content, "-- DOWN").unwrap();
-        content.push_str(&m.down);
-        (filename, content)
-    }).collect()
+    plan.migrations
+        .iter()
+        .map(|m| {
+            let filename = format!("{}.sql", m.id);
+            let mut content = String::new();
+            writeln!(content, "-- UP").unwrap();
+            content.push_str(&m.up);
+            writeln!(content).unwrap();
+            writeln!(content, "-- DOWN").unwrap();
+            content.push_str(&m.down);
+            (filename, content)
+        })
+        .collect()
 }
 
 pub struct MigrationRunner {
@@ -219,7 +300,8 @@ edition = "2024"
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres"] }
 tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
-"#.to_string();
+"#
+    .to_string();
 
     let mut main_rs = String::new();
     writeln!(main_rs, "use sqlx::PgPool;").unwrap();
@@ -238,19 +320,39 @@ chrono = "0.4"
     for step in &plan.migrations {
         let up_escaped = step.up.replace('\\', "\\\\").replace('"', "\\\"");
         let down_escaped = step.down.replace('\\', "\\\\").replace('"', "\\\"");
-        writeln!(main_rs, "    Migration {{ id: \"{}\", up: \"{}\", down: \"{}\" }},",
-            step.id, up_escaped, down_escaped).unwrap();
+        writeln!(
+            main_rs,
+            "    Migration {{ id: \"{}\", up: \"{}\", down: \"{}\" }},",
+            step.id, up_escaped, down_escaped
+        )
+        .unwrap();
     }
     writeln!(main_rs, "];").unwrap();
     writeln!(main_rs).unwrap();
 
     writeln!(main_rs, "#[tokio::main]").unwrap();
     writeln!(main_rs, "async fn main() {{").unwrap();
-    writeln!(main_rs, "    let args: Vec<String> = std::env::args().collect();").unwrap();
-    writeln!(main_rs, "    let command = args.get(1).map(|s| s.as_str()).unwrap_or(\"up\");").unwrap();
+    writeln!(
+        main_rs,
+        "    let args: Vec<String> = std::env::args().collect();"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "    let command = args.get(1).map(|s| s.as_str()).unwrap_or(\"up\");"
+    )
+    .unwrap();
     writeln!(main_rs).unwrap();
-    writeln!(main_rs, "    let url = std::env::var(\"DATABASE_URL\").expect(\"DATABASE_URL required\");").unwrap();
-    writeln!(main_rs, "    let pool = PgPool::connect(&url).await.expect(\"db connect failed\");").unwrap();
+    writeln!(
+        main_rs,
+        "    let url = std::env::var(\"DATABASE_URL\").expect(\"DATABASE_URL required\");"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "    let pool = PgPool::connect(&url).await.expect(\"db connect failed\");"
+    )
+    .unwrap();
     writeln!(main_rs).unwrap();
     writeln!(main_rs, "    ensure_migrations_table(&pool).await;").unwrap();
     writeln!(main_rs).unwrap();
@@ -258,21 +360,45 @@ chrono = "0.4"
     writeln!(main_rs, "        \"up\" => run_pending(&pool).await,").unwrap();
     writeln!(main_rs, "        \"down\" => rollback_last(&pool).await,").unwrap();
     writeln!(main_rs, "        \"status\" => show_status(&pool).await,").unwrap();
-    writeln!(main_rs, "        other => eprintln!(\"unknown command: {{}}. use: up, down, status\", other),").unwrap();
+    writeln!(
+        main_rs,
+        "        other => eprintln!(\"unknown command: {{}}. use: up, down, status\", other),"
+    )
+    .unwrap();
     writeln!(main_rs, "    }}").unwrap();
     writeln!(main_rs, "}}").unwrap();
     writeln!(main_rs).unwrap();
 
-    writeln!(main_rs, "async fn ensure_migrations_table(pool: &PgPool) {{").unwrap();
-    writeln!(main_rs, "    sqlx::query(\"CREATE TABLE IF NOT EXISTS _axis_migrations (").unwrap();
+    writeln!(
+        main_rs,
+        "async fn ensure_migrations_table(pool: &PgPool) {{"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "    sqlx::query(\"CREATE TABLE IF NOT EXISTS _axis_migrations ("
+    )
+    .unwrap();
     writeln!(main_rs, "        id VARCHAR(255) PRIMARY KEY,").unwrap();
-    writeln!(main_rs, "        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()").unwrap();
+    writeln!(
+        main_rs,
+        "        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+    )
+    .unwrap();
     writeln!(main_rs, "    )\").execute(pool).await.unwrap();").unwrap();
     writeln!(main_rs, "}}").unwrap();
     writeln!(main_rs).unwrap();
 
-    writeln!(main_rs, "async fn get_applied(pool: &PgPool) -> Vec<String> {{").unwrap();
-    writeln!(main_rs, "    sqlx::query_scalar::<_, String>(\"SELECT id FROM _axis_migrations ORDER BY id\")").unwrap();
+    writeln!(
+        main_rs,
+        "async fn get_applied(pool: &PgPool) -> Vec<String> {{"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "    sqlx::query_scalar::<_, String>(\"SELECT id FROM _axis_migrations ORDER BY id\")"
+    )
+    .unwrap();
     writeln!(main_rs, "        .fetch_all(pool).await.unwrap()").unwrap();
     writeln!(main_rs, "}}").unwrap();
     writeln!(main_rs).unwrap();
@@ -281,28 +407,64 @@ chrono = "0.4"
     writeln!(main_rs, "    let applied = get_applied(pool).await;").unwrap();
     writeln!(main_rs, "    let mut count = 0;").unwrap();
     writeln!(main_rs, "    for m in MIGRATIONS {{").unwrap();
-    writeln!(main_rs, "        if !applied.contains(&m.id.to_string()) {{").unwrap();
+    writeln!(
+        main_rs,
+        "        if !applied.contains(&m.id.to_string()) {{"
+    )
+    .unwrap();
     writeln!(main_rs, "            println!(\"applying {{}}\", m.id);").unwrap();
     writeln!(main_rs, "            sqlx::query(m.up).execute(pool).await").unwrap();
-    writeln!(main_rs, "                .unwrap_or_else(|e| panic!(\"migration {{}} failed: {{}}\", m.id, e));").unwrap();
-    writeln!(main_rs, "            sqlx::query(\"INSERT INTO _axis_migrations (id) VALUES ($1)\")").unwrap();
-    writeln!(main_rs, "                .bind(m.id).execute(pool).await.unwrap();").unwrap();
+    writeln!(
+        main_rs,
+        "                .unwrap_or_else(|e| panic!(\"migration {{}} failed: {{}}\", m.id, e));"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "            sqlx::query(\"INSERT INTO _axis_migrations (id) VALUES ($1)\")"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "                .bind(m.id).execute(pool).await.unwrap();"
+    )
+    .unwrap();
     writeln!(main_rs, "            count += 1;").unwrap();
     writeln!(main_rs, "        }}").unwrap();
     writeln!(main_rs, "    }}").unwrap();
-    writeln!(main_rs, "    println!(\"{{}} migration(s) applied\", count);").unwrap();
+    writeln!(
+        main_rs,
+        "    println!(\"{{}} migration(s) applied\", count);"
+    )
+    .unwrap();
     writeln!(main_rs, "}}").unwrap();
     writeln!(main_rs).unwrap();
 
     writeln!(main_rs, "async fn rollback_last(pool: &PgPool) {{").unwrap();
     writeln!(main_rs, "    let applied = get_applied(pool).await;").unwrap();
     writeln!(main_rs, "    if let Some(last) = applied.last() {{").unwrap();
-    writeln!(main_rs, "        let m = MIGRATIONS.iter().find(|m| m.id == last).expect(\"migration not found\");").unwrap();
+    writeln!(
+        main_rs,
+        "        let m = MIGRATIONS.iter().find(|m| m.id == last).expect(\"migration not found\");"
+    )
+    .unwrap();
     writeln!(main_rs, "        println!(\"rolling back {{}}\", m.id);").unwrap();
     writeln!(main_rs, "        sqlx::query(m.down).execute(pool).await").unwrap();
-    writeln!(main_rs, "            .unwrap_or_else(|e| panic!(\"rollback {{}} failed: {{}}\", m.id, e));").unwrap();
-    writeln!(main_rs, "        sqlx::query(\"DELETE FROM _axis_migrations WHERE id = $1\")").unwrap();
-    writeln!(main_rs, "            .bind(m.id).execute(pool).await.unwrap();").unwrap();
+    writeln!(
+        main_rs,
+        "            .unwrap_or_else(|e| panic!(\"rollback {{}} failed: {{}}\", m.id, e));"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "        sqlx::query(\"DELETE FROM _axis_migrations WHERE id = $1\")"
+    )
+    .unwrap();
+    writeln!(
+        main_rs,
+        "            .bind(m.id).execute(pool).await.unwrap();"
+    )
+    .unwrap();
     writeln!(main_rs, "        println!(\"rolled back {{}}\", m.id);").unwrap();
     writeln!(main_rs, "    }} else {{").unwrap();
     writeln!(main_rs, "        println!(\"no migrations to roll back\");").unwrap();
@@ -458,8 +620,9 @@ MIGRATE Order v1 TO v2
     #[test]
     fn test_full_example_migrations() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let program = compile_source(&input).unwrap();
         let plan = plan_migrations(&program);
         assert_eq!(plan.migrations.len(), 1);

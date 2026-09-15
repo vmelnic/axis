@@ -19,25 +19,34 @@ pub fn watch_project(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     watch_project_with_options(dir, &WatchOptions::default())
 }
 
-pub fn watch_project_with_options(dir: &Path, opts: &WatchOptions) -> Result<(), Box<dyn std::error::Error>> {
+pub fn watch_project_with_options(
+    dir: &Path,
+    opts: &WatchOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("watching {} for .axis changes...", dir.display());
     run_check(dir, opts);
 
     let (tx, rx) = mpsc::channel();
 
-    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        if let Ok(event) = res {
-            let dominated = matches!(
-                event.kind,
-                notify::EventKind::Modify(_) | notify::EventKind::Create(_) | notify::EventKind::Remove(_)
-            );
-            if dominated && event.paths.iter().any(|p| {
-                p.extension().is_some_and(|e| e == "axis")
-            }) {
-                let _ = tx.send(());
+    let mut watcher =
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                let dominated = matches!(
+                    event.kind,
+                    notify::EventKind::Modify(_)
+                        | notify::EventKind::Create(_)
+                        | notify::EventKind::Remove(_)
+                );
+                if dominated
+                    && event
+                        .paths
+                        .iter()
+                        .any(|p| p.extension().is_some_and(|e| e == "axis"))
+                {
+                    let _ = tx.send(());
+                }
             }
-        }
-    })?;
+        })?;
 
     watcher.watch(dir, RecursiveMode::Recursive)?;
 
@@ -304,7 +313,8 @@ FLOW get_user get /users/:id
     fn tempdir() -> std::path::PathBuf {
         static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let id = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let dir = std::env::temp_dir().join(format!("axis_watch_test_{}_{}", std::process::id(), id));
+        let dir =
+            std::env::temp_dir().join(format!("axis_watch_test_{}_{}", std::process::id(), id));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir

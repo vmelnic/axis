@@ -64,7 +64,9 @@ FLOW get_user get /users/:id
 .axis source → lex → parse → verify → serve (axum + sqlx → Postgres/MySQL/SQLite)
 ```
 
-The interpreter handles all 12 constructs at runtime: JWT/API-key auth, tenant isolation, guards, rules, rate limiting, response caching, MATCH/TRY/RECOVER control flow, EACH loops, FUNC calls, SURFACE route aliasing, WebSocket/SSE streams, SAGA compensation, and Prometheus metrics.
+The interpreter handles all 12 constructs at runtime: JWT/API-key auth, tenant isolation, guards, rules, rate limiting, response caching, MATCH/TRY/RECOVER control flow, EACH loops, atomic UPSERT, single-statement FANOUT, scoped idempotency with exact response replay, transactional outbox effects, FUNC calls, SURFACE route aliasing, WebSocket/SSE streams, SAGA compensation, and Prometheus metrics.
+
+For reliable commands such as sending a message or charging a payment, `IDEMPOTENCY key SCOPE owner TTL seconds` makes the reservation, SQL reads and writes, fan-out, outbox records, and stored HTTP response one transaction. The compiler rejects configurations that cannot provide that guarantee.
 
 ## CLI
 
@@ -77,7 +79,7 @@ axis --routes <file>         # list routes
 axis --emit <file>           # execution plan
 axis --plan <file>           # execution plan with warnings
 axis --link <file>           # link report
-axis --openapi <file>        # OpenAPI 3.0 spec
+axis --openapi <file>        # OpenAPI 3.1 spec
 axis --ts <file>             # TypeScript type definitions
 axis --rust <file>           # Rust/axum server generation
 axis --client-ts <file>      # TypeScript API client SDK
@@ -98,6 +100,9 @@ axis --lsp                   # language server (stdio)
 ```
 
 Reads from stdin if no file argument is provided.
+
+`--project` composes with code-generation modes, for example
+`axis --project --openapi <dir>` and `axis --project --sql <dir>`.
 
 Environment variables for `--serve`:
 

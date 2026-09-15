@@ -15,16 +15,25 @@ pub struct WasmModule {
 }
 
 pub fn generate(program: &Program) -> WasmProject {
-    let flows: Vec<&FlowDef> = program.constructs.iter().filter_map(|c| {
-        if let Construct::Flow(f) = c { Some(f) } else { None }
-    }).collect();
+    let flows: Vec<&FlowDef> = program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Flow(f) = c {
+                Some(f)
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    let modules = flows.iter().map(|flow| {
-        WasmModule {
+    let modules = flows
+        .iter()
+        .map(|flow| WasmModule {
             name: flow.name.clone(),
             source: generate_flow_module(flow),
-        }
-    }).collect();
+        })
+        .collect();
 
     WasmProject {
         cargo_toml: generate_wasm_cargo_toml(),
@@ -49,7 +58,8 @@ wit-bindgen = "0.36"
 [profile.release]
 opt-level = "s"
 lto = true
-"#.into()
+"#
+    .into()
 }
 
 fn generate_flow_module(flow: &FlowDef) -> String {
@@ -77,7 +87,11 @@ fn generate_flow_module(flow: &FlowDef) -> String {
     }
 
     writeln!(out, "pub fn handle(request: &str) -> String {{").unwrap();
-    writeln!(out, "    let _req: Value = serde_json::from_str(request).unwrap_or_default();").unwrap();
+    writeln!(
+        out,
+        "    let _req: Value = serde_json::from_str(request).unwrap_or_default();"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     for step in &flow.steps {
@@ -105,10 +119,18 @@ fn generate_flow_module(flow: &FlowDef) -> String {
     let code = flow.return_stmt.code;
     match &flow.return_stmt.body {
         Some(ReturnBody::Binding(name)) => {
-            writeln!(out, "    let resp = Response {{ status: {code}, body: {name} }};").unwrap();
+            writeln!(
+                out,
+                "    let resp = Response {{ status: {code}, body: {name} }};"
+            )
+            .unwrap();
         }
         _ => {
-            writeln!(out, "    let resp = Response {{ status: {code}, body: Value::Null }};").unwrap();
+            writeln!(
+                out,
+                "    let resp = Response {{ status: {code}, body: Value::Null }};"
+            )
+            .unwrap();
         }
     }
     writeln!(out, "    serde_json::to_string(&resp).unwrap()").unwrap();

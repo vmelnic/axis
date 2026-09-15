@@ -91,8 +91,7 @@ fn generate_flow_tests(flow: &FlowDef, program: &Program) -> Vec<GeneratedTest> 
         }
     }
 
-    let has_idempotency_header = flow.headers.iter().any(|h| h.name == "idempotency_key");
-    if has_idempotency_header && matches!(flow.method, HttpMethod::Post) {
+    if flow.idempotency.is_some() {
         tests.push(generate_idempotency_test(flow, &method_str));
     }
 
@@ -102,11 +101,9 @@ fn generate_flow_tests(flow: &FlowDef, program: &Program) -> Vec<GeneratedTest> 
 fn generate_type_invariant(flow: &FlowDef, method: &str, program: &Program) -> GeneratedTest {
     let body_fields = flow.body.as_ref().map(|b| &b.fields);
     let body = body_fields.map(|f| build_valid_body(f));
-    let return_shape = flow.return_stmt.body.as_ref().and_then(|b| {
-        match b {
-            ReturnBody::Binding(name) => find_binding_shape(flow, name, program),
-            ReturnBody::Inline(_) | ReturnBody::Paginated { .. } => None,
-        }
+    let return_shape = flow.return_stmt.body.as_ref().and_then(|b| match b {
+        ReturnBody::Binding(name) => find_binding_shape(flow, name, program),
+        ReturnBody::Inline(_) | ReturnBody::Paginated { .. } => None,
     });
 
     GeneratedTest {
@@ -186,6 +183,12 @@ fn generate_guard_invariant(flow: &FlowDef, guard: &GuardStep, method: &str) -> 
 
 fn generate_idempotency_test(flow: &FlowDef, method: &str) -> GeneratedTest {
     let body = flow.body.as_ref().map(|b| build_valid_body(&b.fields));
+    let header = flow
+        .idempotency
+        .as_ref()
+        .and_then(|declaration| declaration.key.segments.get(1))
+        .map(|name| name.replace('_', "-"))
+        .unwrap_or_else(|| "Idempotency-Key".into());
     GeneratedTest {
         name: format!("{}_idempotent", flow.name),
         flow: flow.name.clone(),
@@ -195,7 +198,7 @@ fn generate_idempotency_test(flow: &FlowDef, method: &str) -> GeneratedTest {
             path: flow.path.clone(),
             body,
             auth: flow.auth.as_ref().map(|_| "valid_token".into()),
-            headers: vec![("Idempotency-Key".into(), "test-key-123".into())],
+            headers: vec![(header, "test-key-123".into())],
         },
         expected: TestExpectation {
             status: ExpectedStatus::Exactly(flow.return_stmt.code),
@@ -332,7 +335,11 @@ FLOW create_user post /users
     fn test_type_invariant_generated() {
         let program = make_test_program();
         let suite = generate_tests(&program);
-        let ti = suite.tests.iter().find(|t| t.name == "get_user_type_invariant").unwrap();
+        let ti = suite
+            .tests
+            .iter()
+            .find(|t| t.name == "get_user_type_invariant")
+            .unwrap();
         assert!(matches!(ti.expected.status, ExpectedStatus::Exactly(200)));
         assert_eq!(ti.request.method, "GET");
     }
@@ -341,8 +348,14 @@ FLOW create_user post /users
     fn test_auth_invariant_generated() {
         let program = make_test_program();
         let suite = generate_tests(&program);
-        let ai = suite.tests.iter().find(|t| t.name == "get_user_auth_required").unwrap();
-        assert!(matches!(ai.expected.status, ExpectedStatus::OneOf(ref codes) if codes.contains(&401)));
+        let ai = suite
+            .tests
+            .iter()
+            .find(|t| t.name == "get_user_auth_required")
+            .unwrap();
+        assert!(
+            matches!(ai.expected.status, ExpectedStatus::OneOf(ref codes) if codes.contains(&401))
+        );
         assert!(ai.request.auth.is_none());
     }
 
@@ -350,7 +363,11 @@ FLOW create_user post /users
     fn test_tenant_isolation_generated() {
         let program = make_test_program();
         let suite = generate_tests(&program);
-        let ti = suite.tests.iter().find(|t| t.name == "get_user_tenant_isolation").unwrap();
+        let ti = suite
+            .tests
+            .iter()
+            .find(|t| t.name == "get_user_tenant_isolation")
+            .unwrap();
         assert!(matches!(ti.category, TestCategory::TenantIsolation));
     }
 
@@ -358,7 +375,11 @@ FLOW create_user post /users
     fn test_guard_invariant_generated() {
         let program = make_test_program();
         let suite = generate_tests(&program);
-        let gi = suite.tests.iter().find(|t| t.name == "get_user_ownership_guard_blocks").unwrap();
+        let gi = suite
+            .tests
+            .iter()
+            .find(|t| t.name == "get_user_ownership_guard_blocks")
+            .unwrap();
         assert!(matches!(gi.expected.status, ExpectedStatus::Exactly(403)));
     }
 
@@ -369,13 +390,26 @@ FLOW create_user post /users
                 name: "email".into(),
                 ty: TypeExpr::String(Some(255)),
                 modifiers: vec![],
-                span: crate::token::Span { offset: 0, len: 0, line: 1, col: 1 },
+                span: crate::token::Span {
+                    offset: 0,
+                    len: 0,
+                    line: 1,
+                    col: 1,
+                },
             },
             FieldDef {
                 name: "count".into(),
-                ty: TypeExpr::Int { min: None, max: None },
+                ty: TypeExpr::Int {
+                    min: None,
+                    max: None,
+                },
                 modifiers: vec![],
-                span: crate::token::Span { offset: 0, len: 0, line: 1, col: 1 },
+                span: crate::token::Span {
+                    offset: 0,
+                    len: 0,
+                    line: 1,
+                    col: 1,
+                },
             },
         ];
         let body = build_valid_body(&fields);
@@ -412,7 +446,11 @@ STREAM notifications ws /ws/notifications
         let mut parser = crate::parser::Parser::new(tokens);
         let program = parser.parse_program().unwrap();
         let suite = generate_tests(&program);
-        let st = suite.tests.iter().find(|t| t.name == "notifications_stream_connect").unwrap();
+        let st = suite
+            .tests
+            .iter()
+            .find(|t| t.name == "notifications_stream_connect")
+            .unwrap();
         assert!(matches!(st.category, TestCategory::StreamConnect));
         assert_eq!(st.request.method, "GET");
         assert_eq!(st.request.path, "/ws/notifications");

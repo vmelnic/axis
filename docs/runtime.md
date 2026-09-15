@@ -30,18 +30,21 @@ HTTP Request
   |
   |-- [6] Tenant Scope        Inject tenant filter into query context.
   |
-  |-- [7] Execute Steps       LET, FETCH, QUERY, CALL, MATCH, RULE, GUARD, etc.
-  |                           DB transaction opened on first mutation.
+  |-- [7] Idempotency         For IDEMPOTENCY flows, reserve the scoped key and
+  |                           open the shared SQL transaction. Replay if complete.
   |
-  |-- [8] Mutate              INSERT/UPDATE/DELETE within transaction.
-  |                           Effects queued within same transaction.
-  |                           Transaction committed.
+  |-- [8] Execute Steps       LET, FETCH, QUERY, CALL, MATCH, RULE, GUARD, etc.
   |
-  |-- [9] Effects             Broadcast to stream subscribers.
+  |-- [9] Mutate              INSERT/UPSERT/UPDATE/DELETE/FANOUT.
+  |                           In an idempotent flow, every SQL operation and
+  |                           outbox write uses the transaction from step 7.
   |
-  |-- [10] Respond            Surface filter -> JSON serialization -> HTTP response.
+  |-- [10] Commit             Store status/body/headers, then commit atomically.
+  |                           Publish committed outbox events to subscribers.
   |
-  |-- [11] Cache Store        Store response in cache if applicable.
+  |-- [11] Respond            Surface filter -> JSON serialization -> HTTP response.
+  |
+  |-- [12] Cache Store        Store response in cache if applicable (GET only).
 ```
 
 ## Authentication
@@ -99,6 +102,12 @@ When a flow declares `SCOPE TENANT auth.user_id`:
 
 `SCOPE TENANT ANY` skips the injection (admin access).
 
+## Atomic Idempotency
+
+`IDEMPOTENCY <key> SCOPE <scope> TTL <seconds>` starts the SQL transaction before any flow step. The reservation row, reads, mutations, FANOUT statement, outbox entries, and serialized response commit together. Concurrent requests serialize on the unique `(flow, scope, key)` constraint. A committed duplicate is replayed; a different payload with the same key returns 409; any error or timeout rolls the reservation and application writes back.
+
+The runtime refuses to execute an idempotent flow if its declared SQL sources resolve to different database URLs. The verifier also rejects mixed SQL dialects and non-transactional operations. Direct service calls are limited to `PURE` methods or provider-deduplicated methods bound to the exact flow key; every other external effect belongs in the transactional outbox.
+
 ## Database Operations
 
 The runtime uses sqlx with connection pooling:
@@ -151,11 +160,14 @@ The `T` (translate) expression resolves locale from the `_locale` binding, falls
 
 ## File Storage
 
-For STORAGE constructs with `BACKEND local`:
+For `STORAGE` constructs with `BACKEND local`:
 
 - Files are written to `{bucket}/{prefix}/{uuid_filename}`.
-- Public storages are served via static file handler at `/files/{bucket}/{prefix}/`.
-- S3 backend is parsed but returns "not implemented" at runtime.
+- Public storages are served at `/files/{storage_name}/{prefix}/{uuid_filename}`.
+
+For `BACKEND s3`, Axis creates an S3 client once at startup and uploads objects atomically through the S3-compatible API. Standard `AWS_*` configuration is supported, including `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL_S3`, and `AWS_ALLOW_HTTP`. Private uploads return an `s3://bucket/key` locator. Public uploads use `AXIS_STORAGE_<NAME>_PUBLIC_BASE_URL`, then `AXIS_S3_PUBLIC_BASE_URL`, and finally the standard AWS public bucket URL.
+
+Multipart requests retain binary data without UTF-8 conversion. `MAX_SIZE` is enforced after decoding, and `TYPES` is checked against detected file signatures where possible. `AXIS_MAX_REQUEST_BODY_BYTES` sets the process-level request cap; otherwise Axis derives a bounded cap from the largest declared storage limit, using 64 MiB for a storage without `MAX_SIZE`.
 
 ## Service Calls
 

@@ -116,7 +116,8 @@ impl<'src> Lexer<'src> {
             return self.lex_path();
         }
 
-        if ch.is_ascii_digit() || (ch == '-' && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())) {
+        if ch.is_ascii_digit() || (ch == '-' && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()))
+        {
             return self.lex_number();
         }
 
@@ -144,14 +145,21 @@ impl<'src> Lexer<'src> {
         }
 
         if self.pos < self.chars.len() && self.chars[self.pos] == '\t' {
-            return Err(AxisError::lex(self.line, self.col, "tabs are not allowed; use 2 spaces"));
+            return Err(AxisError::lex(
+                self.line,
+                self.col,
+                "tabs are not allowed; use 2 spaces",
+            ));
         }
 
         if self.pos < self.chars.len() && self.chars[self.pos] == '\n' {
             return self.lex_newline();
         }
 
-        if self.pos < self.chars.len() && self.chars[self.pos] == '-' && self.peek_at(1) == Some('-') {
+        if self.pos < self.chars.len()
+            && self.chars[self.pos] == '-'
+            && self.peek_at(1) == Some('-')
+        {
             self.skip_comment();
             return self.next_token();
         }
@@ -163,7 +171,11 @@ impl<'src> Lexer<'src> {
                 return Err(AxisError::lex(
                     self.line,
                     self.col,
-                    format!("indent must be exactly 2 spaces (got {}, expected {})", spaces, current + 2),
+                    format!(
+                        "indent must be exactly 2 spaces (got {}, expected {})",
+                        spaces,
+                        current + 2
+                    ),
                 ));
             }
             self.indent_stack.push(spaces);
@@ -215,13 +227,21 @@ impl<'src> Lexer<'src> {
         let mut value = String::new();
         while self.pos < self.chars.len() && self.chars[self.pos] != '"' {
             if self.chars[self.pos] == '\n' {
-                return Err(AxisError::lex(self.line, self.col, "unterminated string literal"));
+                return Err(AxisError::lex(
+                    self.line,
+                    self.col,
+                    "unterminated string literal",
+                ));
             }
             value.push(self.chars[self.pos]);
             self.advance();
         }
         if self.pos >= self.chars.len() {
-            return Err(AxisError::lex(self.line, self.col, "unterminated string literal"));
+            return Err(AxisError::lex(
+                self.line,
+                self.col,
+                "unterminated string literal",
+            ));
         }
         self.advance(); // skip closing "
         let len = self.pos - start;
@@ -236,7 +256,13 @@ impl<'src> Lexer<'src> {
         let mut path = String::new();
         while self.pos < self.chars.len() {
             let ch = self.chars[self.pos];
-            if ch.is_ascii_alphanumeric() || ch == '/' || ch == ':' || ch == '_' || ch == '-' || ch == '.' {
+            if ch.is_ascii_alphanumeric()
+                || ch == '/'
+                || ch == ':'
+                || ch == '_'
+                || ch == '-'
+                || ch == '.'
+            {
                 path.push(ch);
                 self.advance();
             } else {
@@ -261,7 +287,10 @@ impl<'src> Lexer<'src> {
             s.push(self.chars[self.pos]);
             self.advance();
         }
-        if self.pos < self.chars.len() && self.chars[self.pos] == '.' && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
+        if self.pos < self.chars.len()
+            && self.chars[self.pos] == '.'
+            && self.peek_at(1).is_some_and(|c| c.is_ascii_digit())
+        {
             s.push('.');
             self.advance();
             while self.pos < self.chars.len() && self.chars[self.pos].is_ascii_digit() {
@@ -275,7 +304,9 @@ impl<'src> Lexer<'src> {
             });
         }
         let len = self.pos - start;
-        let n: i64 = s.parse().map_err(|_| AxisError::lex(self.line, self.col, format!("invalid integer: {s}")))?;
+        let n: i64 = s
+            .parse()
+            .map_err(|_| AxisError::lex(self.line, self.col, format!("invalid integer: {s}")))?;
         Ok(Token {
             kind: TokenKind::IntLit(n),
             span: self.span_from(start, len),
@@ -285,7 +316,9 @@ impl<'src> Lexer<'src> {
     fn lex_upper_word(&mut self) -> AxisResult<Token> {
         let start = self.pos;
         let mut word = String::new();
-        while self.pos < self.chars.len() && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_') {
+        while self.pos < self.chars.len()
+            && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_')
+        {
             word.push(self.chars[self.pos]);
             self.advance();
         }
@@ -296,7 +329,9 @@ impl<'src> Lexer<'src> {
         {
             word.push(self.chars[self.pos]);
             self.advance();
-            while self.pos < self.chars.len() && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_') {
+            while self.pos < self.chars.len()
+                && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_')
+            {
                 word.push(self.chars[self.pos]);
                 self.advance();
             }
@@ -330,8 +365,11 @@ impl<'src> Lexer<'src> {
             "FETCH" => TokenKind::Fetch,
             "QUERY" => TokenKind::Query,
             "INSERT" => TokenKind::Insert,
+            "UPSERT" => TokenKind::Upsert,
             "UPDATE" => TokenKind::Update,
             "DELETE" => TokenKind::Delete,
+            "FANOUT" => TokenKind::Fanout,
+            "IDEMPOTENCY" => TokenKind::Idempotency,
             "CALL" => TokenKind::Call,
             "EFFECT" => TokenKind::Effect,
             "MATCH" => TokenKind::Match,
@@ -445,6 +483,7 @@ impl<'src> Lexer<'src> {
             "READS" => TokenKind::Reads,
             "METHOD" => TokenKind::Method,
             "WHERE" => TokenKind::Where,
+            "KEY" => TokenKind::Key,
             "SET" => TokenKind::Set,
             "COPY" => TokenKind::Copy,
             "COMPUTE" => TokenKind::Compute,
@@ -484,6 +523,7 @@ impl<'src> Lexer<'src> {
             "OUTPUT" => TokenKind::Output,
             "TIMEOUT" => TokenKind::Timeout,
             "RETRY" => TokenKind::Retry,
+            "PURE" => TokenKind::Pure,
             "BACKOFF" => TokenKind::Backoff,
             "TTL" => TokenKind::Ttl,
             "VARY" => TokenKind::Vary,
@@ -502,9 +542,7 @@ impl<'src> Lexer<'src> {
             "MAX_SIZE" => TokenKind::MaxSize,
             "TYPES" => TokenKind::Types,
             "UPLOAD" => TokenKind::Upload,
-            "GET" | "POST" | "PUT" | "PATCH" => {
-                TokenKind::Ident(word.to_lowercase())
-            }
+            "GET" | "POST" | "PUT" | "PATCH" => TokenKind::Ident(word.to_lowercase()),
             _ => {
                 if word.chars().next().unwrap().is_ascii_uppercase()
                     && word.chars().any(|c| c.is_ascii_lowercase())
@@ -521,7 +559,9 @@ impl<'src> Lexer<'src> {
     fn lex_lower_word(&mut self) -> AxisResult<Token> {
         let start = self.pos;
         let mut word = String::new();
-        while self.pos < self.chars.len() && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_') {
+        while self.pos < self.chars.len()
+            && (self.chars[self.pos].is_ascii_alphanumeric() || self.chars[self.pos] == '_')
+        {
             word.push(self.chars[self.pos]);
             self.advance();
         }
@@ -666,10 +706,16 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         let kinds: Vec<_> = tokens.iter().map(|t| &t.kind).collect();
 
-        let indent_count = kinds.iter().filter(|k| matches!(k, TokenKind::Indent)).count();
-        let dedent_count = kinds.iter().filter(|k| matches!(k, TokenKind::Dedent)).count();
+        let indent_count = kinds
+            .iter()
+            .filter(|k| matches!(k, TokenKind::Indent))
+            .count();
+        let dedent_count = kinds
+            .iter()
+            .filter(|k| matches!(k, TokenKind::Dedent))
+            .count();
         assert_eq!(indent_count, 2); // level 0→2, level 2→4
-        assert!(dedent_count >= 2);  // level 4→2, level 2→0
+        assert!(dedent_count >= 2); // level 4→2, level 2→0
     }
 
     #[test]

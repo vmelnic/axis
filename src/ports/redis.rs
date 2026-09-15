@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
 
 use redis::AsyncCommands;
 use serde_json::Value;
@@ -16,8 +16,8 @@ pub struct RedisPort {
 
 impl RedisPort {
     pub async fn connect(url: &str, prefix: &str) -> Result<Self, AdapterError> {
-        let client = redis::Client::open(url)
-            .map_err(|e| AdapterError::ConnectionFailed(e.to_string()))?;
+        let client =
+            redis::Client::open(url).map_err(|e| AdapterError::ConnectionFailed(e.to_string()))?;
         let conn = client
             .get_connection_manager()
             .await
@@ -63,16 +63,18 @@ impl SourceAdapter for RedisPort {
 
     fn fetch(&self, req: FetchRequest) -> BoxFut<'_, Result<Option<Value>, AdapterError>> {
         Box::pin(async move {
-            let id = Self::extract_id(&req.filters)
-                .ok_or_else(|| AdapterError::OperationFailed("FETCH requires id or key filter".into()))?;
+            let id = Self::extract_id(&req.filters).ok_or_else(|| {
+                AdapterError::OperationFailed("FETCH requires id or key filter".into())
+            })?;
             let key = self.key(&req.source, id);
             let mut conn = self.conn.clone();
-            let raw: Option<String> = conn.get(&key).await
+            let raw: Option<String> = conn
+                .get(&key)
+                .await
                 .map_err(|e| AdapterError::OperationFailed(e.to_string()))?;
             match raw {
                 Some(s) => {
-                    let val: Value = serde_json::from_str(&s)
-                        .unwrap_or(Value::String(s));
+                    let val: Value = serde_json::from_str(&s).unwrap_or(Value::String(s));
                     Ok(Some(val))
                 }
                 None => Ok(None),
@@ -82,7 +84,9 @@ impl SourceAdapter for RedisPort {
 
     fn insert(&self, req: InsertRequest) -> BoxFut<'_, Result<Value, AdapterError>> {
         Box::pin(async move {
-            let id = req.fields.get("id")
+            let id = req
+                .fields
+                .get("id")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -92,7 +96,9 @@ impl SourceAdapter for RedisPort {
             let json = serde_json::to_string(&record)
                 .map_err(|e| AdapterError::OperationFailed(e.to_string()))?;
             let mut conn = self.conn.clone();
-            let _: () = conn.set(&key, &json).await
+            let _: () = conn
+                .set(&key, &json)
+                .await
                 .map_err(|e| AdapterError::OperationFailed(e.to_string()))?;
             Ok(serde_json::json!(record))
         })
@@ -100,11 +106,14 @@ impl SourceAdapter for RedisPort {
 
     fn delete(&self, req: DeleteRequest) -> BoxFut<'_, Result<u64, AdapterError>> {
         Box::pin(async move {
-            let id = Self::extract_id(&req.filters)
-                .ok_or_else(|| AdapterError::OperationFailed("DELETE requires id or key filter".into()))?;
+            let id = Self::extract_id(&req.filters).ok_or_else(|| {
+                AdapterError::OperationFailed("DELETE requires id or key filter".into())
+            })?;
             let key = self.key(&req.source, id);
             let mut conn = self.conn.clone();
-            let deleted: u64 = conn.del(&key).await
+            let deleted: u64 = conn
+                .del(&key)
+                .await
                 .map_err(|e| AdapterError::OperationFailed(e.to_string()))?;
             Ok(deleted)
         })
@@ -113,7 +122,10 @@ impl SourceAdapter for RedisPort {
 
 pub fn redis_factory() -> AdapterFactory {
     Box::new(|config: &HashMap<String, String>| {
-        let url = config.get("url").cloned().unwrap_or_else(|| "redis://127.0.0.1/".into());
+        let url = config
+            .get("url")
+            .cloned()
+            .unwrap_or_else(|| "redis://127.0.0.1/".into());
         let prefix = config.get("prefix").cloned().unwrap_or_default();
         Box::pin(async move {
             let adapter = RedisPort::connect(&url, &prefix).await?;

@@ -173,6 +173,13 @@ pub struct PolicyDef {
 #[derive(Debug, Clone)]
 pub struct AppliesTo {
     pub filters: Vec<PolicyFilter>,
+    pub mode: PolicyMatchMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PolicyMatchMode {
+    All,
+    Any,
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +188,7 @@ pub enum PolicyFilter {
     Reads(String),
     Writes(String),
     PathStartsWith(String),
+    Not(Box<PolicyFilter>),
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +198,8 @@ pub enum RequireClause {
     Scope,
     Rule(String),
     Guard(String),
+    Idempotency,
+    Fanout,
 }
 
 // --- Services ---
@@ -207,6 +217,10 @@ pub struct ServiceDef {
 #[derive(Debug, Clone)]
 pub struct ServiceMethod {
     pub name: String,
+    pub pure: bool,
+    /// Input field used by the provider to deduplicate externally observable
+    /// effects. Axis verifies that idempotent flows pass their exact flow key.
+    pub idempotency_input: Option<String>,
     pub inputs: Vec<(String, TypeExpr)>,
     pub outputs: Vec<(String, TypeExpr)>,
     pub timeout: Option<Duration>,
@@ -269,6 +283,7 @@ pub struct FlowDef {
     pub body: Option<BodyDecl>,
     pub params: Vec<ParamDecl>,
     pub headers: Vec<HeaderDecl>,
+    pub idempotency: Option<IdempotencyDecl>,
     pub steps: Vec<FlowStep>,
     pub return_stmt: ReturnStmt,
     pub span: Span,
@@ -278,6 +293,14 @@ pub struct FlowDef {
 pub struct CacheDecl {
     pub ttl: i64,
     pub vary: Vec<DotPath>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IdempotencyDecl {
+    pub key: DotPath,
+    pub scope: DotPath,
+    pub ttl: i64,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -298,10 +321,7 @@ pub enum AuthDecl {
     ApiKey,
     Role(String),
     RoleIn(Vec<String>),
-    WebhookSignature {
-        secret: String,
-        algorithm: String,
-    },
+    WebhookSignature { secret: String, algorithm: String },
 }
 
 #[derive(Debug, Clone)]
@@ -367,8 +387,10 @@ pub enum FlowStep {
     Let(LetStep),
     Set(SetStep),
     Insert(InsertStep),
+    Upsert(UpsertStep),
     Update(UpdateStep),
     Delete(DeleteStep),
+    Fanout(FanoutStep),
     Effect(EffectStep),
     Match(MatchStep),
     Each(EachStep),
@@ -411,6 +433,23 @@ pub struct InsertStep {
     pub source: String,
     pub fields: Vec<(String, Expr)>,
     pub binding: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertStep {
+    pub source: String,
+    pub keys: Vec<(String, Expr)>,
+    pub sets: Vec<SetClause>,
+    pub binding: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct FanoutStep {
+    pub binding: String,
+    pub source: Expr,
+    pub insert: InsertStep,
     pub span: Span,
 }
 
@@ -867,15 +906,9 @@ pub struct ExposeDef {
 
 #[derive(Debug, Clone)]
 pub enum ExposeField {
-    Field {
-        name: String,
-        ty: TypeExpr,
-    },
+    Field { name: String, ty: TypeExpr },
     Hide(String),
-    Rename {
-        from: String,
-        to: String,
-    },
+    Rename { from: String, to: String },
 }
 
 #[derive(Debug, Clone)]
@@ -898,16 +931,10 @@ pub struct MigrateDef {
 #[derive(Debug, Clone)]
 pub enum MigrateOp {
     Copy(Vec<String>),
-    Compute {
-        field: String,
-        expr: Expr,
-    },
+    Compute { field: String, expr: Expr },
     Drop(String),
     Add(FieldDef),
-    Rename {
-        from: String,
-        to: String,
-    },
+    Rename { from: String, to: String },
 }
 
 // --- Streams ---

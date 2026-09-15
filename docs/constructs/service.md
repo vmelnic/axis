@@ -10,6 +10,8 @@ SERVICE <name>
   AUTH <type> VAULT <key_name>
 
   METHOD <name>
+    [PURE]
+    [IDEMPOTENCY <input_name>]
     INPUT <param1> <type1> [param2 type2 ...]
     OUTPUT <param1> <type1> [param2 type2 ...]
     [TIMEOUT <duration>]
@@ -69,6 +71,39 @@ The secret is resolved from the vault at runtime (environment variables by defau
 ## METHOD
 
 Each METHOD declares an operation that flows can invoke via `CALL service.method`.
+
+### PURE
+
+`PURE` declares that a method has no externally observable side effects and that the same inputs can be evaluated repeatedly. Axis therefore permits it in flows that also declare `IDEMPOTENCY`; a failed transaction may safely evaluate the call again. False declarations break the service contract: use `PURE` only for validation, deterministic derivation, and read-only computation. Capability checks, timeout handling, and failure handling still apply.
+
+```axis
+METHOD verify_signature
+  PURE
+  INPUT public_key TEXT payload TEXT signature TEXT
+  OUTPUT valid BOOL
+TIMEOUT 3s
+```
+
+### IDEMPOTENCY
+
+`IDEMPOTENCY <input_name>` declares an effectful provider method with durable
+deduplication. The named `STRING`, `TEXT`, or `UUID` input is the provider's
+operation key: repeated calls with that key must return the same logical result
+without repeating the external effect.
+
+```axis
+METHOD send_otp
+  IDEMPOTENCY operation_id
+  INPUT operation_id UUID phone_ciphertext TEXT
+  OUTPUT delivery_id STRING 128 code_hash STRING 128 expires_at TIMESTAMP
+```
+
+In a flow that also declares `IDEMPOTENCY`, Axis permits this call only when the
+named method argument is bound directly to the flow's exact idempotency key.
+This covers the failure window where the provider succeeds and the SQL
+transaction later rolls back: the retry observes the provider's stored result
+and can safely commit locally. `PURE` and method `IDEMPOTENCY` are mutually
+exclusive. A false declaration violates the service adapter contract.
 
 ### INPUT / OUTPUT
 
@@ -134,4 +169,5 @@ The realm must have `CAPABILITY call <service_name>` for the service to be calla
 - Service and method names are verified when referenced in CALL.
 - CALL arguments are type-checked against METHOD INPUT.
 - CALL always requires an OR clause (external services can always fail).
+- An idempotent mutating flow may call a `PURE` method or a provider-deduplicated method whose declared `IDEMPOTENCY` input receives the exact flow key. Other effects must use the transactional outbox. Direct calls can run while the SQL transaction is open, so they should be fast and have strict timeouts.
 - The flow's realm must have `CAPABILITY call <service_name>`.

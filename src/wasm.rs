@@ -285,13 +285,11 @@ FLOW process_b get /b/:id
     #[test]
     fn test_wasm_manifest_serializes() {
         let manifest = WasmManifest {
-            modules: vec![
-                WasmModuleRef {
-                    hash: "sha256:abc".into(),
-                    used_by: vec!["flow_a".into()],
-                    inputs: vec!["user.name".into()],
-                },
-            ],
+            modules: vec![WasmModuleRef {
+                hash: "sha256:abc".into(),
+                used_by: vec!["flow_a".into()],
+                inputs: vec!["user.name".into()],
+            }],
         };
         let json = serde_json::to_string_pretty(&manifest).unwrap();
         assert!(json.contains("sha256:abc"));

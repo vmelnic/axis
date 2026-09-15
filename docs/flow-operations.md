@@ -77,6 +77,23 @@ HEADER accept_language STRING DEFAULT "en"
 
 Accessed as `header.<name>` in expressions.
 
+## IDEMPOTENCY
+
+Makes a mutating flow exactly-once from the caller's perspective.
+
+```axis
+IDEMPOTENCY header.idempotency_key SCOPE auth.user_id TTL 86400
+```
+
+- `key` and `scope` must resolve to scalar values. Keys are limited to 255 bytes and scopes to 512 bytes.
+- The first request reserves `(flow, scope, key)` inside the same transaction as all flow SQL.
+- An identical retry returns the previously committed status, JSON body, and response headers. `Idempotency-Replayed` is `false` on the first response and `true` on replay.
+- Reusing the key with a different path, query, or body returns `409`.
+- Failed and timed-out flows roll back both application writes and the reservation, so a corrected retry can execute.
+- `TTL` is in seconds. Expired reservations are reclaimed transactionally and stale rows are cleaned periodically.
+
+IDEMPOTENCY is invalid on GET or a flow without a database mutation. Every accessed source must be PostgreSQL, MySQL, or SQLite, use the same dialect, and resolve to the same database URL. `TRY` and `UPLOAD` are rejected. A direct `CALL` is accepted only for a `PURE` method or for a method with provider `IDEMPOTENCY` whose named argument is the exact flow key; use `EFFECT` for all other external work.
+
 ## LIMIT
 
 Rate limiting.
@@ -321,6 +338,23 @@ The compiler verifies:
 - Field types match.
 - Unknown fields are rejected.
 
+## UPSERT
+
+Atomically inserts a row or updates it when a declared unique key already exists.
+
+```axis
+UPSERT message_receipts
+  KEY message_id body.message_id
+  KEY user_id auth.user_id
+  SET state "read"
+  SET read_at NOW
+AS receipt
+```
+
+At least one `KEY` and one `SET` are required. The complete ordered KEY list must exactly match the shape primary key or one `INDEX ... UNIQUE` declaration. KEY fields cannot also appear in SET, and duplicate KEY or SET fields are compile errors. `AS` binds the actual inserted or updated row on PostgreSQL, MySQL, and SQLite.
+
+UPSERT is a single database statement (`ON CONFLICT ... DO UPDATE` or `ON DUPLICATE KEY UPDATE`), so concurrent writers cannot create a read-before-write race.
+
 ## UPDATE
 
 Update existing rows.
@@ -369,6 +403,22 @@ OR 404 "booking not found"
 
 At least one WHERE clause is required. Unqualified DELETE is a compile error. OR is required.
 
+## FANOUT
+
+Bulk-inserts one row per collection item with a single SQL statement.
+
+```axis
+FANOUT recipient IN body.recipient_ids
+  INSERT delivery_events
+    message_id path.id
+    recipient_id recipient
+    state "pending"
+```
+
+The source expression must have a `LIST` type. The item binding exists only inside the nested INSERT. `AS` is intentionally forbidden because a fan-out can produce many rows. FANOUT is supported only for transactional SQL sources and rejects a collection that would exceed the backend's parameter limit (65,535 for PostgreSQL/MySQL and 32,766 for SQLite). An empty list is a successful no-op.
+
+Unlike `EACH ... INSERT`, FANOUT guarantees one bulk statement. Under IDEMPOTENCY it participates in the same transaction as the key reservation, UPSERTs, other mutations, outbox entries, and stored response.
+
 ## CALL
 
 Invoke an external service method.
@@ -396,7 +446,7 @@ LET result
 
 ## EFFECT
 
-Asynchronous side effects. Executed after the flow's database transaction commits. Fire-and-forget from the flow's perspective.
+Asynchronous side effects represented as durable transactional-outbox records. The outbox record commits with the flow's SQL; delivery or stream publication becomes visible only after a successful commit. This prevents sending a notification for a transaction that later rolls back.
 
 ```axis
 EFFECT email
@@ -439,9 +489,7 @@ EFFECT webhook
 | `EVENT <name>` | Event type name |
 | `TASK <name>` | Background task type |
 
-Effects cannot appear before mutations (compiler-enforced ordering).
-
-At runtime, effects are broadcast to stream subscribers and processed asynchronously.
+Effects cannot appear before mutations (compiler-enforced ordering). The outbox payload includes a unique id, kind, routing fields, complete JSON data, status, and timestamps so workers can retry delivery safely.
 
 ## MATCH
 

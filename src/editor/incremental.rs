@@ -44,7 +44,8 @@ pub fn validate_partial(source: &str) -> IncrementalResult {
     let valid_next = constrain::valid_tokens(&state);
 
     let partial_program = try_parse_partial(source);
-    let constructs_so_far = partial_program.as_ref()
+    let constructs_so_far = partial_program
+        .as_ref()
         .map(|p| p.constructs.len())
         .unwrap_or(0);
 
@@ -83,12 +84,19 @@ fn source_ends_closed(source: &str) -> bool {
 
 fn infer_state(tokens: &[Token], source_closed: bool) -> ParseState {
     let mut state = ParseState::TopLevel;
-    let skip_structural = |t: &TokenKind| matches!(t,
-        TokenKind::ShapeName(_) | TokenKind::Path(_) |
-        TokenKind::Arrow | TokenKind::Dot | TokenKind::Colon
-    );
+    let skip_structural = |t: &TokenKind| {
+        matches!(
+            t,
+            TokenKind::ShapeName(_)
+                | TokenKind::Path(_)
+                | TokenKind::Arrow
+                | TokenKind::Dot
+                | TokenKind::Colon
+        )
+    };
 
-    let filtered: Vec<&Token> = tokens.iter()
+    let filtered: Vec<&Token> = tokens
+        .iter()
         .filter(|t| !skip_structural(&t.kind))
         .collect();
 
@@ -108,8 +116,12 @@ fn infer_state(tokens: &[Token], source_closed: bool) -> ParseState {
         }
 
         if has_trailing_indent && token.kind == TokenKind::Dedent {
-            let remaining = filtered[i..].iter()
-                .all(|t| matches!(t.kind, TokenKind::Dedent | TokenKind::Eof | TokenKind::Newline));
+            let remaining = filtered[i..].iter().all(|t| {
+                matches!(
+                    t.kind,
+                    TokenKind::Dedent | TokenKind::Eof | TokenKind::Newline
+                )
+            });
             if remaining {
                 break;
             }
@@ -188,26 +200,26 @@ fn infer_state(tokens: &[Token], source_closed: bool) -> ParseState {
         }
 
         match (&state, &token.kind) {
-            (ParseState::FlowBody, TokenKind::Realm) |
-            (ParseState::FlowBody, TokenKind::Auth) |
-            (ParseState::FlowBody, TokenKind::Scope) |
-            (ParseState::FlowBody, TokenKind::Limit) |
-            (ParseState::FlowBody, TokenKind::Cache) |
-            (ParseState::FlowBody, TokenKind::Param) |
-            (ParseState::FlowBody, TokenKind::Header) => {
+            (ParseState::FlowBody, TokenKind::Realm)
+            | (ParseState::FlowBody, TokenKind::Auth)
+            | (ParseState::FlowBody, TokenKind::Scope)
+            | (ParseState::FlowBody, TokenKind::Limit)
+            | (ParseState::FlowBody, TokenKind::Cache)
+            | (ParseState::FlowBody, TokenKind::Param)
+            | (ParseState::FlowBody, TokenKind::Header) => {
                 i += 1;
                 skip_to_newline(&filtered, &mut i);
                 continue;
             }
-            (ParseState::FlowBody, TokenKind::Body) |
-            (ParseState::FlowBody, TokenKind::Rule) |
-            (ParseState::FlowBody, TokenKind::Guard) |
-            (ParseState::FlowBody, TokenKind::Let) |
-            (ParseState::FlowBody, TokenKind::Insert) |
-            (ParseState::FlowBody, TokenKind::Update) |
-            (ParseState::FlowBody, TokenKind::Delete) |
-            (ParseState::FlowBody, TokenKind::Effect) |
-            (ParseState::FlowBody, TokenKind::Match) => {
+            (ParseState::FlowBody, TokenKind::Body)
+            | (ParseState::FlowBody, TokenKind::Rule)
+            | (ParseState::FlowBody, TokenKind::Guard)
+            | (ParseState::FlowBody, TokenKind::Let)
+            | (ParseState::FlowBody, TokenKind::Insert)
+            | (ParseState::FlowBody, TokenKind::Update)
+            | (ParseState::FlowBody, TokenKind::Delete)
+            | (ParseState::FlowBody, TokenKind::Effect)
+            | (ParseState::FlowBody, TokenKind::Match) => {
                 i += 1;
                 skip_block(&filtered, &mut i);
                 if i < filtered.len() && filtered[i].kind == TokenKind::As {
@@ -273,10 +285,10 @@ fn infer_state(tokens: &[Token], source_closed: bool) -> ParseState {
                 skip_to_newline(&filtered, &mut i);
                 continue;
             }
-            (ParseState::SagaBody, TokenKind::Body) |
-            (ParseState::SagaBody, TokenKind::Step) |
-            (ParseState::SagaBody, TokenKind::OnFailure) |
-            (ParseState::SagaBody, TokenKind::OnSuccess) => {
+            (ParseState::SagaBody, TokenKind::Body)
+            | (ParseState::SagaBody, TokenKind::Step)
+            | (ParseState::SagaBody, TokenKind::OnFailure)
+            | (ParseState::SagaBody, TokenKind::OnSuccess) => {
                 i += 1;
                 skip_block(&filtered, &mut i);
                 continue;
@@ -300,10 +312,15 @@ fn infer_state(tokens: &[Token], source_closed: bool) -> ParseState {
 }
 
 fn has_unclosed_indent(tokens: &[Token]) -> bool {
-    let last_content = tokens.iter().rposition(|t|
-        !matches!(t.kind, TokenKind::Eof | TokenKind::Dedent | TokenKind::Newline));
+    let last_content = tokens.iter().rposition(|t| {
+        !matches!(
+            t.kind,
+            TokenKind::Eof | TokenKind::Dedent | TokenKind::Newline
+        )
+    });
     if let Some(pos) = last_content {
-        let indent_at_last = tokens[..=pos].iter()
+        let indent_at_last = tokens[..=pos]
+            .iter()
             .map(|t| match t.kind {
                 TokenKind::Indent => 1i32,
                 TokenKind::Dedent => -1,
@@ -379,12 +396,23 @@ fn validate_tokens_incremental(tokens: &[Token]) -> Vec<IncrementalError> {
             TokenKind::Indent => indent_depth += 1,
             TokenKind::Dedent => indent_depth -= 1,
             TokenKind::Newline | TokenKind::Eof => {}
-            TokenKind::ShapeName(_) | TokenKind::Path(_) |
-            TokenKind::Arrow | TokenKind::Dot | TokenKind::Colon => {}
+            TokenKind::ShapeName(_)
+            | TokenKind::Path(_)
+            | TokenKind::Arrow
+            | TokenKind::Dot
+            | TokenKind::Colon => {}
             kind => {
                 if matches!(state, ParseState::TopLevel) {
                     let constraint = constrain::valid_tokens(&state);
-                    if !constraint.allows(kind) && !matches!(kind, TokenKind::Ident(_) | TokenKind::IntLit(_) | TokenKind::DecimalLit(_) | TokenKind::StringLit(_)) {
+                    if !constraint.allows(kind)
+                        && !matches!(
+                            kind,
+                            TokenKind::Ident(_)
+                                | TokenKind::IntLit(_)
+                                | TokenKind::DecimalLit(_)
+                                | TokenKind::StringLit(_)
+                        )
+                    {
                         errors.push(IncrementalError {
                             line: token.span.line,
                             col: token.span.col,
@@ -429,7 +457,8 @@ mod tests {
 
     #[test]
     fn test_shape_still_open() {
-        let result = validate_partial("SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n");
+        let result =
+            validate_partial("SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n");
         assert_eq!(result.state, ParseState::ShapeBody);
         assert!(!result.complete);
         assert_eq!(result.constructs_so_far, 1);
@@ -437,7 +466,8 @@ mod tests {
 
     #[test]
     fn test_complete_shape() {
-        let result = validate_partial("SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n\n");
+        let result =
+            validate_partial("SHAPE User\n  id UUID PK AUTO\n  name STRING 100 REQUIRED\n\n");
         assert_eq!(result.state, ParseState::TopLevel);
         assert!(result.complete);
         assert_eq!(result.constructs_so_far, 1);
@@ -470,7 +500,8 @@ mod tests {
 
     #[test]
     fn test_partial_flow_after_let() {
-        let result = validate_partial(r#"SHAPE User
+        let result = validate_partial(
+            r#"SHAPE User
   id UUID PK AUTO
 
 SOURCE users POSTGRES
@@ -487,7 +518,8 @@ FLOW get_user get /users/:id
     FETCH users
       FILTER id EQ path.id
     OR 404
-"#);
+"#,
+        );
         assert_eq!(result.state, ParseState::FlowBody);
         assert!(result.valid_next.allows(&TokenKind::Return));
         assert!(result.valid_next.allows(&TokenKind::Guard));
@@ -495,7 +527,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_complete_flow() {
-        let result = validate_partial(r#"SHAPE User
+        let result = validate_partial(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -514,7 +547,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         assert_eq!(result.state, ParseState::TopLevel);
         assert!(result.complete);
         assert_eq!(result.constructs_so_far, 4);
@@ -552,19 +586,22 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_partial_program_available() {
-        let result = validate_partial(r#"SHAPE User
+        let result = validate_partial(
+            r#"SHAPE User
   id UUID PK AUTO
 
 SHAPE Order
   id UUID PK AUTO
-"#);
+"#,
+        );
         assert!(result.partial_program.is_some());
         assert_eq!(result.constructs_so_far, 2);
     }
 
     #[test]
     fn test_multiple_constructs_partial() {
-        let result = validate_partial(r#"SHAPE User
+        let result = validate_partial(
+            r#"SHAPE User
   id UUID PK AUTO
 
 SOURCE users POSTGRES
@@ -577,7 +614,8 @@ REALM api
 FLOW get_user get /users/:id
   REALM api
   AUTH session
-"#);
+"#,
+        );
         assert_eq!(result.state, ParseState::FlowBody);
         assert!(!result.complete);
         assert!(result.constructs_so_far >= 3);

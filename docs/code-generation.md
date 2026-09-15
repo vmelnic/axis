@@ -53,10 +53,11 @@ Output sections:
 
 ## OpenAPI Specification (`--openapi`)
 
-Generates an OpenAPI 3.0 JSON specification.
+Generates an OpenAPI 3.1 JSON specification.
 
 ```bash
 axis --openapi app.axis
+axis --project --openapi my-api/
 ```
 
 Includes:

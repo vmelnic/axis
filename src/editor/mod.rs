@@ -1,5 +1,5 @@
-pub mod lsp;
-pub mod incremental;
+pub mod constrain;
 pub mod diff;
 pub mod fmt;
-pub mod constrain;
+pub mod incremental;
+pub mod lsp;

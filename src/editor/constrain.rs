@@ -63,6 +63,8 @@ pub enum ParseState {
     InlineExpr,
     BlockExpr,
     InsertField,
+    UpsertBody,
+    FanoutBody,
     ReturnStmt,
     SagaHeader,
     SagaBody,
@@ -172,10 +174,15 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Dedent,
         ]),
 
-        ParseState::PolicyFilter => Constraint::Exactly(vec![
-            TokenKind::Method,
-            TokenKind::Reads,
-            TokenKind::Writes,
+        ParseState::PolicyFilter => Constraint::AnyOf(vec![
+            Constraint::Exactly(vec![
+                TokenKind::Method,
+                TokenKind::Reads,
+                TokenKind::Writes,
+                TokenKind::Not,
+                TokenKind::Any,
+            ]),
+            Constraint::AnyIdent,
         ]),
 
         ParseState::RequireClause => Constraint::Exactly(vec![
@@ -184,6 +191,8 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Scope,
             TokenKind::Rule,
             TokenKind::Guard,
+            TokenKind::Idempotency,
+            TokenKind::Fanout,
         ]),
 
         ParseState::ServiceBody => Constraint::Exactly(vec![
@@ -194,6 +203,8 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
         ]),
 
         ParseState::ServiceMethodBody => Constraint::Exactly(vec![
+            TokenKind::Pure,
+            TokenKind::Idempotency,
             TokenKind::Input,
             TokenKind::Output,
             TokenKind::Timeout,
@@ -202,9 +213,7 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Dedent,
         ]),
 
-        ParseState::FlowHeader => Constraint::AnyOf(vec![
-            Constraint::AnyIdent,
-        ]),
+        ParseState::FlowHeader => Constraint::AnyOf(vec![Constraint::AnyIdent]),
 
         ParseState::FlowBody => Constraint::Exactly(vec![
             TokenKind::Realm,
@@ -212,17 +221,25 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Scope,
             TokenKind::Limit,
             TokenKind::Cache,
+            TokenKind::Timeout,
             TokenKind::Body,
             TokenKind::Param,
             TokenKind::Header,
+            TokenKind::Idempotency,
             TokenKind::Rule,
             TokenKind::Guard,
             TokenKind::Let,
             TokenKind::Insert,
+            TokenKind::Upsert,
             TokenKind::Update,
             TokenKind::Delete,
+            TokenKind::Fanout,
             TokenKind::Effect,
             TokenKind::Match,
+            TokenKind::Set,
+            TokenKind::Each,
+            TokenKind::Try,
+            TokenKind::Upload,
             TokenKind::Return,
         ]),
 
@@ -251,10 +268,16 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Guard,
             TokenKind::Let,
             TokenKind::Insert,
+            TokenKind::Upsert,
             TokenKind::Update,
             TokenKind::Delete,
+            TokenKind::Fanout,
             TokenKind::Effect,
             TokenKind::Match,
+            TokenKind::Set,
+            TokenKind::Each,
+            TokenKind::Try,
+            TokenKind::Upload,
             TokenKind::Return,
             TokenKind::Dedent,
         ]),
@@ -360,13 +383,18 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             Constraint::Exactly(vec![TokenKind::As, TokenKind::Dedent]),
         ]),
 
-        ParseState::ReturnStmt => Constraint::AnyOf(vec![
-            Constraint::AnyInt,
-        ]),
+        ParseState::UpsertBody => Constraint::AnyOf(vec![Constraint::Exactly(vec![
+            TokenKind::Key,
+            TokenKind::Set,
+            TokenKind::As,
+            TokenKind::Dedent,
+        ])]),
 
-        ParseState::SagaHeader => Constraint::AnyOf(vec![
-            Constraint::AnyIdent,
-        ]),
+        ParseState::FanoutBody => Constraint::Exactly(vec![TokenKind::Insert, TokenKind::Dedent]),
+
+        ParseState::ReturnStmt => Constraint::AnyOf(vec![Constraint::AnyInt]),
+
+        ParseState::SagaHeader => Constraint::AnyOf(vec![Constraint::AnyIdent]),
 
         ParseState::SagaBody => Constraint::Exactly(vec![
             TokenKind::Realm,
@@ -409,9 +437,7 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Dedent,
         ]),
 
-        ParseState::DeprecateClause => Constraint::AnyOf(vec![
-            Constraint::AnyIdent,
-        ]),
+        ParseState::DeprecateClause => Constraint::AnyOf(vec![Constraint::AnyIdent]),
 
         ParseState::MigrateBody => Constraint::Exactly(vec![
             TokenKind::Copy,
@@ -422,30 +448,19 @@ pub fn valid_tokens(state: &ParseState) -> Constraint {
             TokenKind::Dedent,
         ]),
 
-        ParseState::UpdateBody => Constraint::Exactly(vec![
-            TokenKind::Where,
-            TokenKind::Set,
-            TokenKind::Dedent,
-        ]),
+        ParseState::UpdateBody => {
+            Constraint::Exactly(vec![TokenKind::Where, TokenKind::Set, TokenKind::Dedent])
+        }
 
-        ParseState::DeleteBody => Constraint::Exactly(vec![
-            TokenKind::Where,
-            TokenKind::Dedent,
-        ]),
+        ParseState::DeleteBody => Constraint::Exactly(vec![TokenKind::Where, TokenKind::Dedent]),
 
-        ParseState::WhereClause => Constraint::AnyOf(vec![
-            Constraint::AnyIdent,
-        ]),
+        ParseState::WhereClause => Constraint::AnyOf(vec![Constraint::AnyIdent]),
 
-        ParseState::SetClause => Constraint::AnyOf(vec![
-            Constraint::AnyIdent,
-        ]),
+        ParseState::SetClause => Constraint::AnyOf(vec![Constraint::AnyIdent]),
 
-        ParseState::MatchBody => Constraint::Exactly(vec![
-            TokenKind::When,
-            TokenKind::Default,
-            TokenKind::Dedent,
-        ]),
+        ParseState::MatchBody => {
+            Constraint::Exactly(vec![TokenKind::When, TokenKind::Default, TokenKind::Dedent])
+        }
 
         ParseState::WhenBranch => Constraint::Exactly(vec![
             TokenKind::Let,
@@ -543,10 +558,12 @@ pub fn next_states(state: &ParseState, token: &TokenKind) -> Vec<ParseState> {
             TokenKind::Rule | TokenKind::Guard => vec![ParseState::BlockExpr],
             TokenKind::Let => vec![ParseState::BlockExpr],
             TokenKind::Insert => vec![ParseState::InsertField],
+            TokenKind::Upsert => vec![ParseState::UpsertBody],
             TokenKind::Update => vec![ParseState::UpdateBody],
             TokenKind::Delete => vec![ParseState::DeleteBody],
             TokenKind::Match => vec![ParseState::MatchBody],
             TokenKind::Effect => vec![ParseState::EffectBody],
+            TokenKind::Fanout => vec![ParseState::FanoutBody],
             TokenKind::Return => vec![ParseState::ReturnStmt],
             TokenKind::Dedent => vec![ParseState::TopLevel],
             _ => vec![ParseState::FlowBody],
@@ -573,6 +590,15 @@ pub fn next_states(state: &ParseState, token: &TokenKind) -> Vec<ParseState> {
         ParseState::InsertField => match token {
             TokenKind::Dedent | TokenKind::As => vec![ParseState::FlowBody],
             _ => vec![ParseState::InlineExpr],
+        },
+        ParseState::UpsertBody => match token {
+            TokenKind::Dedent | TokenKind::As => vec![ParseState::FlowBody],
+            _ => vec![ParseState::InlineExpr],
+        },
+        ParseState::FanoutBody => match token {
+            TokenKind::Insert => vec![ParseState::InsertField],
+            TokenKind::Dedent => vec![ParseState::FlowBody],
+            _ => vec![ParseState::FanoutBody],
         },
         ParseState::ReturnStmt => vec![ParseState::TopLevel],
         ParseState::SagaHeader => vec![ParseState::SagaBody],
@@ -689,53 +715,166 @@ const ALL_STATES: &[ParseState] = &[
 
 fn keyword_tokens() -> Vec<TokenKind> {
     vec![
-        TokenKind::Shape, TokenKind::Source, TokenKind::Realm, TokenKind::Flow,
-        TokenKind::Saga, TokenKind::Surface, TokenKind::Migrate, TokenKind::Policy,
+        TokenKind::Shape,
+        TokenKind::Source,
+        TokenKind::Realm,
+        TokenKind::Flow,
+        TokenKind::Saga,
+        TokenKind::Surface,
+        TokenKind::Migrate,
+        TokenKind::Policy,
         TokenKind::Service,
-        TokenKind::Postgres, TokenKind::Mysql, TokenKind::Redis,
-        TokenKind::Elasticsearch, TokenKind::Dynamodb,
-        TokenKind::Auth, TokenKind::Body, TokenKind::Param, TokenKind::Header,
-        TokenKind::Rule, TokenKind::Guard, TokenKind::Let, TokenKind::Fetch,
-        TokenKind::Query, TokenKind::Insert, TokenKind::Update, TokenKind::Delete,
-        TokenKind::Call, TokenKind::Effect, TokenKind::Match, TokenKind::When,
-        TokenKind::Default, TokenKind::Return, TokenKind::Limit, TokenKind::Cache,
-        TokenKind::Scope, TokenKind::Require,
-        TokenKind::Filter, TokenKind::Sort, TokenKind::Asc, TokenKind::Desc,
-        TokenKind::Cursor, TokenKind::PageSize,
-        TokenKind::Or, TokenKind::And, TokenKind::Not, TokenKind::If,
-        TokenKind::Eq, TokenKind::Neq, TokenKind::Gt, TokenKind::Gte,
-        TokenKind::Lt, TokenKind::Lte, TokenKind::In, TokenKind::Between,
-        TokenKind::Like, TokenKind::Empty, TokenKind::Exists,
-        TokenKind::Add, TokenKind::Sub, TokenKind::Mul, TokenKind::Div, TokenKind::Mod,
-        TokenKind::Round, TokenKind::Ceil, TokenKind::Floor, TokenKind::Abs,
-        TokenKind::Count, TokenKind::Sum, TokenKind::Avg, TokenKind::Min, TokenKind::Max,
-        TokenKind::First, TokenKind::Last,
-        TokenKind::Concat, TokenKind::Lower, TokenKind::Upper, TokenKind::Trim,
-        TokenKind::Substring, TokenKind::Length,
-        TokenKind::StartsWith, TokenKind::EndsWith, TokenKind::Contains,
-        TokenKind::DaysBetween, TokenKind::HoursBetween, TokenKind::MinutesBetween,
-        TokenKind::Now, TokenKind::NowPlus, TokenKind::NowMinus,
-        TokenKind::FormatDate, TokenKind::Coalesce, TokenKind::ToInt,
-        TokenKind::ToDecimal, TokenKind::ToString_,
-        TokenKind::Uuid, TokenKind::String_, TokenKind::Text, TokenKind::Int,
-        TokenKind::Decimal, TokenKind::Bool, TokenKind::Date, TokenKind::Timestamp,
-        TokenKind::Enum, TokenKind::Ref, TokenKind::List, TokenKind::Map,
-        TokenKind::Json, TokenKind::Maybe,
-        TokenKind::Pk, TokenKind::Auto, TokenKind::Required, TokenKind::Unique,
-        TokenKind::Precision, TokenKind::Scale,
-        TokenKind::Index, TokenKind::Tenant, TokenKind::Capability,
-        TokenKind::Field, TokenKind::Hide, TokenKind::Expose, TokenKind::Deprecate,
-        TokenKind::Route, TokenKind::Step, TokenKind::Verify, TokenKind::Compensate,
-        TokenKind::Yield_, TokenKind::OnSuccess, TokenKind::OnFailure,
-        TokenKind::Template, TokenKind::Data, TokenKind::Task, TokenKind::AppliesTo,
-        TokenKind::Writes, TokenKind::Reads, TokenKind::Method,
-        TokenKind::Where, TokenKind::Set, TokenKind::Copy, TokenKind::Compute,
-        TokenKind::Drop, TokenKind::None_, TokenKind::True_, TokenKind::False_,
-        TokenKind::As, TokenKind::To, TokenKind::Rename, TokenKind::Sunset,
-        TokenKind::BasePath, TokenKind::Endpoint, TokenKind::Vault,
-        TokenKind::Input, TokenKind::Output, TokenKind::Timeout, TokenKind::Retry,
-        TokenKind::Backoff, TokenKind::Ttl, TokenKind::Stream, TokenKind::Event,
-        TokenKind::Dedent, TokenKind::Newline, TokenKind::Eof,
+        TokenKind::Postgres,
+        TokenKind::Mysql,
+        TokenKind::Redis,
+        TokenKind::Elasticsearch,
+        TokenKind::Dynamodb,
+        TokenKind::Auth,
+        TokenKind::Body,
+        TokenKind::Param,
+        TokenKind::Header,
+        TokenKind::Rule,
+        TokenKind::Guard,
+        TokenKind::Let,
+        TokenKind::Fetch,
+        TokenKind::Query,
+        TokenKind::Insert,
+        TokenKind::Update,
+        TokenKind::Delete,
+        TokenKind::Call,
+        TokenKind::Effect,
+        TokenKind::Match,
+        TokenKind::When,
+        TokenKind::Default,
+        TokenKind::Return,
+        TokenKind::Limit,
+        TokenKind::Cache,
+        TokenKind::Scope,
+        TokenKind::Require,
+        TokenKind::Filter,
+        TokenKind::Sort,
+        TokenKind::Asc,
+        TokenKind::Desc,
+        TokenKind::Cursor,
+        TokenKind::PageSize,
+        TokenKind::Or,
+        TokenKind::And,
+        TokenKind::Not,
+        TokenKind::If,
+        TokenKind::Eq,
+        TokenKind::Neq,
+        TokenKind::Gt,
+        TokenKind::Gte,
+        TokenKind::Lt,
+        TokenKind::Lte,
+        TokenKind::In,
+        TokenKind::Between,
+        TokenKind::Like,
+        TokenKind::Empty,
+        TokenKind::Exists,
+        TokenKind::Add,
+        TokenKind::Sub,
+        TokenKind::Mul,
+        TokenKind::Div,
+        TokenKind::Mod,
+        TokenKind::Round,
+        TokenKind::Ceil,
+        TokenKind::Floor,
+        TokenKind::Abs,
+        TokenKind::Count,
+        TokenKind::Sum,
+        TokenKind::Avg,
+        TokenKind::Min,
+        TokenKind::Max,
+        TokenKind::First,
+        TokenKind::Last,
+        TokenKind::Concat,
+        TokenKind::Lower,
+        TokenKind::Upper,
+        TokenKind::Trim,
+        TokenKind::Substring,
+        TokenKind::Length,
+        TokenKind::StartsWith,
+        TokenKind::EndsWith,
+        TokenKind::Contains,
+        TokenKind::DaysBetween,
+        TokenKind::HoursBetween,
+        TokenKind::MinutesBetween,
+        TokenKind::Now,
+        TokenKind::NowPlus,
+        TokenKind::NowMinus,
+        TokenKind::FormatDate,
+        TokenKind::Coalesce,
+        TokenKind::ToInt,
+        TokenKind::ToDecimal,
+        TokenKind::ToString_,
+        TokenKind::Uuid,
+        TokenKind::String_,
+        TokenKind::Text,
+        TokenKind::Int,
+        TokenKind::Decimal,
+        TokenKind::Bool,
+        TokenKind::Date,
+        TokenKind::Timestamp,
+        TokenKind::Enum,
+        TokenKind::Ref,
+        TokenKind::List,
+        TokenKind::Map,
+        TokenKind::Json,
+        TokenKind::Maybe,
+        TokenKind::Pk,
+        TokenKind::Auto,
+        TokenKind::Required,
+        TokenKind::Unique,
+        TokenKind::Precision,
+        TokenKind::Scale,
+        TokenKind::Index,
+        TokenKind::Tenant,
+        TokenKind::Capability,
+        TokenKind::Field,
+        TokenKind::Hide,
+        TokenKind::Expose,
+        TokenKind::Deprecate,
+        TokenKind::Route,
+        TokenKind::Step,
+        TokenKind::Verify,
+        TokenKind::Compensate,
+        TokenKind::Yield_,
+        TokenKind::OnSuccess,
+        TokenKind::OnFailure,
+        TokenKind::Template,
+        TokenKind::Data,
+        TokenKind::Task,
+        TokenKind::AppliesTo,
+        TokenKind::Writes,
+        TokenKind::Reads,
+        TokenKind::Method,
+        TokenKind::Where,
+        TokenKind::Set,
+        TokenKind::Copy,
+        TokenKind::Compute,
+        TokenKind::Drop,
+        TokenKind::None_,
+        TokenKind::True_,
+        TokenKind::False_,
+        TokenKind::As,
+        TokenKind::To,
+        TokenKind::Rename,
+        TokenKind::Sunset,
+        TokenKind::BasePath,
+        TokenKind::Endpoint,
+        TokenKind::Vault,
+        TokenKind::Input,
+        TokenKind::Output,
+        TokenKind::Timeout,
+        TokenKind::Retry,
+        TokenKind::Backoff,
+        TokenKind::Ttl,
+        TokenKind::Stream,
+        TokenKind::Event,
+        TokenKind::Dedent,
+        TokenKind::Newline,
+        TokenKind::Eof,
     ]
 }
 
@@ -806,41 +945,44 @@ fn collect_into_set(c: &Constraint, set: &mut ValidSet) {
 
 pub fn export_grammar() -> GrammarExport {
     let all_tokens = keyword_tokens();
-    let states = ALL_STATES.iter().map(|state| {
-        let constraint = valid_tokens(state);
-        let valid = constraint_to_valid_set(&constraint);
+    let states = ALL_STATES
+        .iter()
+        .map(|state| {
+            let constraint = valid_tokens(state);
+            let valid = constraint_to_valid_set(&constraint);
 
-        let mut transitions = Vec::new();
-        let mut seen_targets = std::collections::HashSet::new();
-        for token in &all_tokens {
-            if constraint.allows(token) {
-                let targets = next_states(state, token);
-                let key = format!("{token}");
-                if seen_targets.insert((key.clone(), targets.clone())) {
+            let mut transitions = Vec::new();
+            let mut seen_targets = std::collections::HashSet::new();
+            for token in &all_tokens {
+                if constraint.allows(token) {
+                    let targets = next_states(state, token);
+                    let key = format!("{token}");
+                    if seen_targets.insert((key.clone(), targets.clone())) {
+                        transitions.push(TransitionExport {
+                            on: key,
+                            to: targets,
+                        });
+                    }
+                }
+            }
+            let wildcard_targets = next_states(state, &TokenKind::Ident("_".into()));
+            if constraint.allows(&TokenKind::Ident("_".into())) {
+                let key = "<ident>".to_string();
+                if seen_targets.insert((key.clone(), wildcard_targets.clone())) {
                     transitions.push(TransitionExport {
                         on: key,
-                        to: targets,
+                        to: wildcard_targets,
                     });
                 }
             }
-        }
-        let wildcard_targets = next_states(state, &TokenKind::Ident("_".into()));
-        if constraint.allows(&TokenKind::Ident("_".into())) {
-            let key = "<ident>".to_string();
-            if seen_targets.insert((key.clone(), wildcard_targets.clone())) {
-                transitions.push(TransitionExport {
-                    on: key,
-                    to: wildcard_targets,
-                });
-            }
-        }
 
-        StateExport {
-            name: state.clone(),
-            valid,
-            transitions,
-        }
-    }).collect();
+            StateExport {
+                name: state.clone(),
+                valid,
+                transitions,
+            }
+        })
+        .collect();
 
     GrammarExport {
         version: 1,
@@ -875,7 +1017,9 @@ pub fn valid_token_ids_for_state(state: &ParseState, vocab: &[String]) -> Vec<us
             "INDENT" => constraint.allows(&TokenKind::Indent),
             _ => {
                 let kw_tokens = keyword_tokens();
-                kw_tokens.iter().any(|k| format!("{k}") == *name && constraint.allows(k))
+                kw_tokens
+                    .iter()
+                    .any(|k| format!("{k}") == *name && constraint.allows(k))
             }
         };
         if allowed {
@@ -894,13 +1038,14 @@ pub struct LogitMask {
 
 pub fn export_logit_masks() -> Vec<LogitMask> {
     let vocab = token_vocabulary();
-    ALL_STATES.iter().map(|state| {
-        LogitMask {
+    ALL_STATES
+        .iter()
+        .map(|state| LogitMask {
             state: state.clone(),
             allowed_ids: valid_token_ids_for_state(state, &vocab),
             vocab_size: vocab.len(),
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1149,12 +1294,19 @@ mod tests {
 
     fn walk_tokens(tokens: &[crate::token::Token]) -> Result<(), String> {
         let mut state = ParseState::TopLevel;
-        let skip_structural = |t: &TokenKind| matches!(t,
-            TokenKind::ShapeName(_) | TokenKind::Path(_) |
-            TokenKind::Arrow | TokenKind::Dot | TokenKind::Colon
-        );
+        let skip_structural = |t: &TokenKind| {
+            matches!(
+                t,
+                TokenKind::ShapeName(_)
+                    | TokenKind::Path(_)
+                    | TokenKind::Arrow
+                    | TokenKind::Dot
+                    | TokenKind::Colon
+            )
+        };
 
-        let tokens: Vec<&crate::token::Token> = tokens.iter()
+        let tokens: Vec<&crate::token::Token> = tokens
+            .iter()
             .filter(|t| !skip_structural(&t.kind))
             .collect();
 
@@ -1173,71 +1325,101 @@ mod tests {
                     TokenKind::Shape => {
                         state = ParseState::ShapeBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Source => {
                         state = ParseState::SourceBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Realm => {
                         state = ParseState::RealmBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Policy => {
                         state = ParseState::PolicyBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Service => {
                         state = ParseState::ServiceBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Migrate => {
                         state = ParseState::MigrateBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Stream => {
                         state = ParseState::StreamBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
-                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline { i += 1; }
+                        if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
+                            i += 1;
+                        }
                         continue;
                     }
                     TokenKind::Flow | TokenKind::Saga => {
                         state = next_states(&state, &token.kind).into_iter().next().unwrap();
                         i += 1;
                         // skip header tokens (name, method, path) until newline
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
                         if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1254,7 +1436,9 @@ mod tests {
                     TokenKind::Surface => {
                         state = ParseState::SurfaceBody;
                         i += 1;
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
                         if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1270,12 +1454,16 @@ mod tests {
             // and we validate the keyword itself but skip inline args
             match (&state, &token.kind) {
                 // REALM/AUTH/SCOPE/LIMIT/CACHE inside flow: keyword + rest of line
-                (ParseState::FlowBody, TokenKind::Realm) |
-                (ParseState::FlowBody, TokenKind::Scope) |
-                (ParseState::FlowBody, TokenKind::Limit) |
-                (ParseState::FlowBody, TokenKind::Cache) => {
+                (ParseState::FlowBody, TokenKind::Realm)
+                | (ParseState::FlowBody, TokenKind::Scope)
+                | (ParseState::FlowBody, TokenKind::Limit)
+                | (ParseState::FlowBody, TokenKind::Cache)
+                | (ParseState::FlowBody, TokenKind::Timeout)
+                | (ParseState::FlowBody, TokenKind::Idempotency) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1286,7 +1474,9 @@ mod tests {
                 (ParseState::FlowBody, TokenKind::Auth) => {
                     state = ParseState::FlowBody;
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1301,10 +1491,12 @@ mod tests {
                     continue;
                 }
                 // PARAM/HEADER name type modifiers
-                (ParseState::FlowBody, TokenKind::Param) |
-                (ParseState::FlowBody, TokenKind::Header) => {
+                (ParseState::FlowBody, TokenKind::Param)
+                | (ParseState::FlowBody, TokenKind::Header) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1313,7 +1505,8 @@ mod tests {
                     continue;
                 }
                 // INSERT has AS continuation at the parent indent level
-                (ParseState::FlowBody, TokenKind::Insert) => {
+                (ParseState::FlowBody, TokenKind::Insert)
+                | (ParseState::FlowBody, TokenKind::Upsert) => {
                     i += 1;
                     skip_block(&tokens, &mut i);
                     if i < tokens.len() && tokens[i].kind == TokenKind::As {
@@ -1323,13 +1516,18 @@ mod tests {
                     continue;
                 }
                 // Flow step keywords: skip keyword + inline args + any nested block
-                (ParseState::FlowBody, TokenKind::Rule) |
-                (ParseState::FlowBody, TokenKind::Guard) |
-                (ParseState::FlowBody, TokenKind::Let) |
-                (ParseState::FlowBody, TokenKind::Update) |
-                (ParseState::FlowBody, TokenKind::Delete) |
-                (ParseState::FlowBody, TokenKind::Effect) |
-                (ParseState::FlowBody, TokenKind::Match) => {
+                (ParseState::FlowBody, TokenKind::Rule)
+                | (ParseState::FlowBody, TokenKind::Guard)
+                | (ParseState::FlowBody, TokenKind::Let)
+                | (ParseState::FlowBody, TokenKind::Set)
+                | (ParseState::FlowBody, TokenKind::Update)
+                | (ParseState::FlowBody, TokenKind::Delete)
+                | (ParseState::FlowBody, TokenKind::Fanout)
+                | (ParseState::FlowBody, TokenKind::Effect)
+                | (ParseState::FlowBody, TokenKind::Match)
+                | (ParseState::FlowBody, TokenKind::Each)
+                | (ParseState::FlowBody, TokenKind::Try)
+                | (ParseState::FlowBody, TokenKind::Upload) => {
                     i += 1;
                     skip_block(&tokens, &mut i);
                     continue;
@@ -1338,7 +1536,9 @@ mod tests {
                 (ParseState::FlowBody, TokenKind::Return) => {
                     state = ParseState::TopLevel;
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1349,7 +1549,9 @@ mod tests {
                 // SourceBody internals
                 (ParseState::SourceBody, TokenKind::Shape) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1359,7 +1561,9 @@ mod tests {
                 }
                 (ParseState::SourceBody, TokenKind::Index) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1369,7 +1573,9 @@ mod tests {
                 }
                 (ParseState::SourceBody, TokenKind::Ttl) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1380,7 +1586,9 @@ mod tests {
                 // RealmBody internals
                 (ParseState::RealmBody, TokenKind::Tenant) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1390,7 +1598,9 @@ mod tests {
                 }
                 (ParseState::RealmBody, TokenKind::Capability) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1401,7 +1611,9 @@ mod tests {
                 // PolicyBody internals
                 (ParseState::PolicyBody, TokenKind::AppliesTo) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1409,7 +1621,9 @@ mod tests {
                     }
                     // skip WHERE clause on next line if present
                     while i < tokens.len() && matches!(tokens[i].kind, TokenKind::Where) {
-                        while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                        while i < tokens.len()
+                            && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                        {
                             i += 1;
                         }
                         if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1420,7 +1634,9 @@ mod tests {
                 }
                 (ParseState::PolicyBody, TokenKind::Require) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1429,10 +1645,12 @@ mod tests {
                     continue;
                 }
                 // ServiceBody internals
-                (ParseState::ServiceBody, TokenKind::Endpoint) |
-                (ParseState::ServiceBody, TokenKind::Auth) => {
+                (ParseState::ServiceBody, TokenKind::Endpoint)
+                | (ParseState::ServiceBody, TokenKind::Auth) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1443,7 +1661,9 @@ mod tests {
                 (ParseState::ServiceBody, TokenKind::Method) => {
                     state = ParseState::ServiceMethodBody;
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1454,7 +1674,9 @@ mod tests {
                 // ServiceMethodBody internals
                 (ParseState::ServiceMethodBody, k) if !matches!(k, TokenKind::Dedent) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1465,7 +1687,9 @@ mod tests {
                 // FlowBodyField (BODY fields) — field lines
                 (ParseState::FlowBodyField, k) if !matches!(k, TokenKind::Dedent) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1474,11 +1698,13 @@ mod tests {
                     continue;
                 }
                 // SurfaceBody internals
-                (ParseState::SurfaceBody, TokenKind::Realm) |
-                (ParseState::SurfaceBody, TokenKind::BasePath) |
-                (ParseState::SurfaceBody, TokenKind::Route) => {
+                (ParseState::SurfaceBody, TokenKind::Realm)
+                | (ParseState::SurfaceBody, TokenKind::BasePath)
+                | (ParseState::SurfaceBody, TokenKind::Route) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1493,7 +1719,9 @@ mod tests {
                 }
                 (ParseState::SurfaceBody, TokenKind::Deprecate) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1504,7 +1732,9 @@ mod tests {
                 // ExposeBody internals
                 (ParseState::ExposeBody, k) if !matches!(k, TokenKind::Dedent) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1515,7 +1745,9 @@ mod tests {
                 // MigrateBody internals
                 (ParseState::MigrateBody, k) if !matches!(k, TokenKind::Dedent) => {
                     i += 1;
-                    while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                    while i < tokens.len()
+                        && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                    {
                         i += 1;
                     }
                     if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1524,17 +1756,17 @@ mod tests {
                     continue;
                 }
                 // SagaBody internals — single-line items
-                (ParseState::SagaBody, TokenKind::Realm) |
-                (ParseState::SagaBody, TokenKind::Auth) => {
+                (ParseState::SagaBody, TokenKind::Realm)
+                | (ParseState::SagaBody, TokenKind::Auth) => {
                     i += 1;
                     skip_line(&tokens, &mut i);
                     continue;
                 }
                 // SagaBody internals — items with nested blocks
-                (ParseState::SagaBody, TokenKind::Body) |
-                (ParseState::SagaBody, TokenKind::Step) |
-                (ParseState::SagaBody, TokenKind::OnFailure) |
-                (ParseState::SagaBody, TokenKind::OnSuccess) => {
+                (ParseState::SagaBody, TokenKind::Body)
+                | (ParseState::SagaBody, TokenKind::Step)
+                | (ParseState::SagaBody, TokenKind::OnFailure)
+                | (ParseState::SagaBody, TokenKind::OnSuccess) => {
                     i += 1;
                     skip_block(&tokens, &mut i);
                     continue;
@@ -1546,8 +1778,8 @@ mod tests {
                     continue;
                 }
                 // StreamBody internals
-                (ParseState::StreamBody, TokenKind::Realm) |
-                (ParseState::StreamBody, TokenKind::Auth) => {
+                (ParseState::StreamBody, TokenKind::Realm)
+                | (ParseState::StreamBody, TokenKind::Auth) => {
                     i += 1;
                     skip_line(&tokens, &mut i);
                     continue;
@@ -1582,12 +1814,18 @@ mod tests {
                 if !constraint.allows(&token.kind) {
                     return Err(format!(
                         "token {} ({:?}) at line {} not allowed in state {:?}. Valid: {:?}",
-                        i, token.kind, token.span.line, state, constraint.token_names()
+                        i,
+                        token.kind,
+                        token.span.line,
+                        state,
+                        constraint.token_names()
                     ));
                 }
                 // field name → skip rest of line (type + modifiers)
                 i += 1;
-                while i < tokens.len() && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof) {
+                while i < tokens.len()
+                    && !matches!(tokens[i].kind, TokenKind::Newline | TokenKind::Eof)
+                {
                     i += 1;
                 }
                 if i < tokens.len() && tokens[i].kind == TokenKind::Newline {
@@ -1601,7 +1839,11 @@ mod tests {
             if !constraint.allows(&token.kind) {
                 return Err(format!(
                     "token {} ({:?}) at line {} not allowed in state {:?}. Valid: {:?}",
-                    i, token.kind, token.span.line, state, constraint.token_names()
+                    i,
+                    token.kind,
+                    token.span.line,
+                    state,
+                    constraint.token_names()
                 ));
             }
             let next = next_states(&state, &token.kind);
@@ -1856,8 +2098,9 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_walk_booking_example() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
+        )
+        .unwrap();
         let tokens = lex(&input);
         walk_tokens(&tokens).unwrap();
     }
@@ -1865,8 +2108,9 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_walk_full_example() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let tokens = lex(&input);
         walk_tokens(&tokens).unwrap();
     }
@@ -1892,7 +2136,11 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_export_grammar_top_level_transitions() {
         let grammar = export_grammar();
-        let top = grammar.states.iter().find(|s| s.name == ParseState::TopLevel).unwrap();
+        let top = grammar
+            .states
+            .iter()
+            .find(|s| s.name == ParseState::TopLevel)
+            .unwrap();
         let shape_t = top.transitions.iter().find(|t| t.on == "SHAPE").unwrap();
         assert_eq!(shape_t.to, vec![ParseState::ShapeBody]);
         let flow_t = top.transitions.iter().find(|t| t.on == "FLOW").unwrap();
@@ -1904,7 +2152,11 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_export_grammar_flow_body_valid_set() {
         let grammar = export_grammar();
-        let flow = grammar.states.iter().find(|s| s.name == ParseState::FlowBody).unwrap();
+        let flow = grammar
+            .states
+            .iter()
+            .find(|s| s.name == ParseState::FlowBody)
+            .unwrap();
         assert!(flow.valid.keywords.contains(&"LET".to_string()));
         assert!(flow.valid.keywords.contains(&"GUARD".to_string()));
         assert!(flow.valid.keywords.contains(&"RETURN".to_string()));
@@ -1914,7 +2166,11 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_export_grammar_shape_body_accepts_ident() {
         let grammar = export_grammar();
-        let shape = grammar.states.iter().find(|s| s.name == ParseState::ShapeBody).unwrap();
+        let shape = grammar
+            .states
+            .iter()
+            .find(|s| s.name == ParseState::ShapeBody)
+            .unwrap();
         assert!(shape.valid.ident);
         assert!(shape.valid.keywords.contains(&"DEDENT".to_string()));
     }
@@ -1922,7 +2178,11 @@ SAGA process_order POST /orders/process
     #[test]
     fn test_export_grammar_block_expr_accepts_literals() {
         let grammar = export_grammar();
-        let expr = grammar.states.iter().find(|s| s.name == ParseState::BlockExpr).unwrap();
+        let expr = grammar
+            .states
+            .iter()
+            .find(|s| s.name == ParseState::BlockExpr)
+            .unwrap();
         assert!(expr.valid.ident);
         assert!(expr.valid.int);
         assert!(expr.valid.decimal);
@@ -1948,7 +2208,11 @@ SAGA process_order POST /orders/process
         let masks = export_logit_masks();
         assert_eq!(masks.len(), ALL_STATES.len());
         for mask in &masks {
-            assert!(!mask.allowed_ids.is_empty(), "state {:?} has no allowed tokens", mask.state);
+            assert!(
+                !mask.allowed_ids.is_empty(),
+                "state {:?} has no allowed tokens",
+                mask.state
+            );
         }
     }
 

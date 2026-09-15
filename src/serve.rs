@@ -6,26 +6,32 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration as StdDuration, Instant};
 
-use axum::extract::{self, Json, Query, State};
+use axum::Router;
+use axum::extract::{self, FromRequest, Json, Multipart, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, on, MethodFilter, MethodRouter};
-use axum::Router;
+use axum::routing::{MethodFilter, MethodRouter, get, on};
+use base64::Engine as _;
+use object_store::aws::AmazonS3Builder;
+use object_store::path::Path as ObjectPath;
+use object_store::{ObjectStore, PutOptions};
 use serde_json::Value;
-use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::mysql::{MySqlPoolOptions, MySqlRow};
+use sqlx::postgres::{PgPoolOptions, PgRow};
 use sqlx::sqlite::{SqlitePoolOptions, SqliteRow};
-use sqlx::{Column, MySqlPool, PgPool, Row, SqlitePool, TypeInfo};
+use sqlx::{Column, MySql, MySqlPool, PgPool, Postgres, Row, Sqlite, SqlitePool, TypeInfo};
 use tokio::sync::broadcast;
-use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::ast::*;
 #[cfg(feature = "redis-port")]
-use crate::adapter::{self as adapter_trait, FilterParam, FilterOp as AdapterFilterOp, SourceAdapter as _};
+use crate::adapter::{
+    self as adapter_trait, FilterOp as AdapterFilterOp, FilterParam, SourceAdapter as _,
+};
+use crate::ast::*;
 #[cfg(feature = "redis-port")]
 use crate::ports::redis::RedisPort;
 
@@ -54,12 +60,25 @@ impl Dialect {
             Dialect::Mysql => "",
         }
     }
+
+    fn now_expr(&self) -> &'static str {
+        match self {
+            Dialect::Postgres | Dialect::Mysql => "NOW()",
+            Dialect::Sqlite => "datetime('now')",
+        }
+    }
 }
 
 enum DbBackend {
     Postgres(PgPool),
     Mysql(MySqlPool),
     Sqlite(SqlitePool),
+}
+
+enum DbConnection {
+    Postgres(sqlx::Transaction<'static, Postgres>),
+    Mysql(sqlx::Transaction<'static, MySql>),
+    Sqlite(sqlx::Transaction<'static, Sqlite>),
 }
 
 impl DbBackend {
@@ -75,22 +94,31 @@ impl DbBackend {
         match self {
             DbBackend::Postgres(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = pg_bind(q, p); }
-                q.fetch_optional(pool).await
+                for p in params {
+                    q = pg_bind(q, p);
+                }
+                q.fetch_optional(pool)
+                    .await
                     .map(|r| r.map(|row| pg_row_json(&row)))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Mysql(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = my_bind(q, p); }
-                q.fetch_optional(pool).await
+                for p in params {
+                    q = my_bind(q, p);
+                }
+                q.fetch_optional(pool)
+                    .await
                     .map(|r| r.map(|row| my_row_json(&row)))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Sqlite(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = sl_bind(q, p); }
-                q.fetch_optional(pool).await
+                for p in params {
+                    q = sl_bind(q, p);
+                }
+                q.fetch_optional(pool)
+                    .await
                     .map(|r| r.map(|row| sl_row_json(&row)))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
@@ -101,22 +129,31 @@ impl DbBackend {
         match self {
             DbBackend::Postgres(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = pg_bind(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = pg_bind(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map(|row| pg_row_json(&row))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Mysql(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = my_bind(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = my_bind(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map(|row| my_row_json(&row))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Sqlite(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = sl_bind(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = sl_bind(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map(|row| sl_row_json(&row))
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
@@ -127,22 +164,31 @@ impl DbBackend {
         match self {
             DbBackend::Postgres(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = pg_bind(q, p); }
-                q.fetch_all(pool).await
+                for p in params {
+                    q = pg_bind(q, p);
+                }
+                q.fetch_all(pool)
+                    .await
                     .map(|rows| rows.iter().map(pg_row_json).collect())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Mysql(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = my_bind(q, p); }
-                q.fetch_all(pool).await
+                for p in params {
+                    q = my_bind(q, p);
+                }
+                q.fetch_all(pool)
+                    .await
                     .map(|rows| rows.iter().map(my_row_json).collect())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Sqlite(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = sl_bind(q, p); }
-                q.fetch_all(pool).await
+                for p in params {
+                    q = sl_bind(q, p);
+                }
+                q.fetch_all(pool)
+                    .await
                     .map(|rows| rows.iter().map(sl_row_json).collect())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
@@ -153,20 +199,29 @@ impl DbBackend {
         match self {
             DbBackend::Postgres(pool) => {
                 let mut q = sqlx::query_scalar::<_, i64>(sql);
-                for p in params { q = pg_bind_scalar(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = pg_bind_scalar(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map_err(|e| FlowErr::Internal(format!("count: {e}")))
             }
             DbBackend::Mysql(pool) => {
                 let mut q = sqlx::query_scalar::<_, i64>(sql);
-                for p in params { q = my_bind_scalar(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = my_bind_scalar(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map_err(|e| FlowErr::Internal(format!("count: {e}")))
             }
             DbBackend::Sqlite(pool) => {
                 let mut q = sqlx::query_scalar::<_, i64>(sql);
-                for p in params { q = sl_bind_scalar(q, p); }
-                q.fetch_one(pool).await
+                for p in params {
+                    q = sl_bind_scalar(q, p);
+                }
+                q.fetch_one(pool)
+                    .await
                     .map_err(|e| FlowErr::Internal(format!("count: {e}")))
             }
         }
@@ -176,22 +231,31 @@ impl DbBackend {
         match self {
             DbBackend::Postgres(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = pg_bind(q, p); }
-                q.execute(pool).await
+                for p in params {
+                    q = pg_bind(q, p);
+                }
+                q.execute(pool)
+                    .await
                     .map(|r| r.rows_affected())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Mysql(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = my_bind(q, p); }
-                q.execute(pool).await
+                for p in params {
+                    q = my_bind(q, p);
+                }
+                q.execute(pool)
+                    .await
                     .map(|r| r.rows_affected())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
             DbBackend::Sqlite(pool) => {
                 let mut q = sqlx::query(sql);
-                for p in params { q = sl_bind(q, p); }
-                q.execute(pool).await
+                for p in params {
+                    q = sl_bind(q, p);
+                }
+                q.execute(pool)
+                    .await
                     .map(|r| r.rows_affected())
                     .map_err(|e| FlowErr::Internal(format!("db: {e}")))
             }
@@ -200,51 +264,576 @@ impl DbBackend {
 
     async fn execute_ddl(&self, sql: &str) -> Result<(), String> {
         match self {
-            DbBackend::Postgres(pool) => {
-                sqlx::query(sql).execute(pool).await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            }
+            DbBackend::Postgres(pool) => sqlx::query(sql)
+                .execute(pool)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            DbBackend::Mysql(pool) => sqlx::query(sql)
+                .execute(pool)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            DbBackend::Sqlite(pool) => sqlx::query(sql)
+                .execute(pool)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+        }
+    }
+
+    async fn ensure_index(
+        &self,
+        table: &str,
+        index: &str,
+        columns: &[String],
+        unique: bool,
+    ) -> Result<(), String> {
+        let qualifier = if unique { "UNIQUE " } else { "" };
+        let columns = columns.join(", ");
+        match self {
             DbBackend::Mysql(pool) => {
-                sqlx::query(sql).execute(pool).await
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
+                let exists = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM information_schema.statistics \
+                     WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+                )
+                .bind(table)
+                .bind(index)
+                .fetch_one(pool)
+                .await
+                .map_err(|error| error.to_string())?;
+                if exists == 0 {
+                    sqlx::query(&format!(
+                        "CREATE {qualifier}INDEX {index} ON {table} ({columns})"
+                    ))
+                    .execute(pool)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                }
+                Ok(())
             }
-            DbBackend::Sqlite(pool) => {
-                sqlx::query(sql).execute(pool).await
+            DbBackend::Postgres(_) | DbBackend::Sqlite(_) => {
+                self.execute_ddl(&format!(
+                    "CREATE {qualifier}INDEX IF NOT EXISTS {index} ON {table} ({columns})"
+                ))
+                .await
+            }
+        }
+    }
+
+    async fn begin(&self) -> Result<DbConnection, FlowErr> {
+        match self {
+            DbBackend::Postgres(pool) => pool
+                .begin()
+                .await
+                .map(DbConnection::Postgres)
+                .map_err(|e| FlowErr::Internal(format!("begin transaction: {e}"))),
+            DbBackend::Mysql(pool) => pool
+                .begin()
+                .await
+                .map(DbConnection::Mysql)
+                .map_err(|e| FlowErr::Internal(format!("begin transaction: {e}"))),
+            DbBackend::Sqlite(pool) => pool
+                .begin()
+                .await
+                .map(DbConnection::Sqlite)
+                .map_err(|e| FlowErr::Internal(format!("begin transaction: {e}"))),
+        }
+    }
+}
+
+impl DbConnection {
+    fn dialect(&self) -> Dialect {
+        match self {
+            DbConnection::Postgres(_) => Dialect::Postgres,
+            DbConnection::Mysql(_) => Dialect::Mysql,
+            DbConnection::Sqlite(_) => Dialect::Sqlite,
+        }
+    }
+
+    async fn fetch_optional(
+        &mut self,
+        sql: &str,
+        params: &[Value],
+    ) -> Result<Option<Value>, FlowErr> {
+        match self {
+            DbConnection::Postgres(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = pg_bind(query, param);
+                }
+                query
+                    .fetch_optional(&mut **connection)
+                    .await
+                    .map(|row| row.map(|row| pg_row_json(&row)))
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Mysql(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = my_bind(query, param);
+                }
+                query
+                    .fetch_optional(&mut **connection)
+                    .await
+                    .map(|row| row.map(|row| my_row_json(&row)))
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Sqlite(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = sl_bind(query, param);
+                }
+                query
+                    .fetch_optional(&mut **connection)
+                    .await
+                    .map(|row| row.map(|row| sl_row_json(&row)))
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+        }
+    }
+
+    async fn fetch_one(&mut self, sql: &str, params: &[Value]) -> Result<Value, FlowErr> {
+        self.fetch_optional(sql, params)
+            .await?
+            .ok_or_else(|| FlowErr::Internal("database returned no row".into()))
+    }
+
+    async fn fetch_all(&mut self, sql: &str, params: &[Value]) -> Result<Vec<Value>, FlowErr> {
+        match self {
+            DbConnection::Postgres(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = pg_bind(query, param);
+                }
+                query
+                    .fetch_all(&mut **connection)
+                    .await
+                    .map(|rows| rows.iter().map(pg_row_json).collect())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Mysql(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = my_bind(query, param);
+                }
+                query
+                    .fetch_all(&mut **connection)
+                    .await
+                    .map(|rows| rows.iter().map(my_row_json).collect())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Sqlite(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = sl_bind(query, param);
+                }
+                query
+                    .fetch_all(&mut **connection)
+                    .await
+                    .map(|rows| rows.iter().map(sl_row_json).collect())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+        }
+    }
+
+    async fn count(&mut self, sql: &str, params: &[Value]) -> Result<i64, FlowErr> {
+        match self {
+            DbConnection::Postgres(connection) => {
+                let mut query = sqlx::query_scalar::<_, i64>(sql);
+                for param in params {
+                    query = pg_bind_scalar(query, param);
+                }
+                query
+                    .fetch_one(&mut **connection)
+                    .await
+                    .map_err(|e| FlowErr::Internal(format!("count: {e}")))
+            }
+            DbConnection::Mysql(connection) => {
+                let mut query = sqlx::query_scalar::<_, i64>(sql);
+                for param in params {
+                    query = my_bind_scalar(query, param);
+                }
+                query
+                    .fetch_one(&mut **connection)
+                    .await
+                    .map_err(|e| FlowErr::Internal(format!("count: {e}")))
+            }
+            DbConnection::Sqlite(connection) => {
+                let mut query = sqlx::query_scalar::<_, i64>(sql);
+                for param in params {
+                    query = sl_bind_scalar(query, param);
+                }
+                query
+                    .fetch_one(&mut **connection)
+                    .await
+                    .map_err(|e| FlowErr::Internal(format!("count: {e}")))
+            }
+        }
+    }
+
+    async fn execute(&mut self, sql: &str, params: &[Value]) -> Result<u64, FlowErr> {
+        match self {
+            DbConnection::Postgres(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = pg_bind(query, param);
+                }
+                query
+                    .execute(&mut **connection)
+                    .await
+                    .map(|result| result.rows_affected())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Mysql(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = my_bind(query, param);
+                }
+                query
+                    .execute(&mut **connection)
+                    .await
+                    .map(|result| result.rows_affected())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+            DbConnection::Sqlite(connection) => {
+                let mut query = sqlx::query(sql);
+                for param in params {
+                    query = sl_bind(query, param);
+                }
+                query
+                    .execute(&mut **connection)
+                    .await
+                    .map(|result| result.rows_affected())
+                    .map_err(|e| FlowErr::Internal(format!("db: {e}")))
+            }
+        }
+    }
+
+    async fn reserve_idempotency(
+        &mut self,
+        flow: &str,
+        scope: &str,
+        key: &str,
+        request_hash: &str,
+        expires_at: i64,
+        now: i64,
+    ) -> Result<bool, FlowErr> {
+        let result = match self {
+            DbConnection::Postgres(connection) => {
+                sqlx::query(
+                    "INSERT INTO _axis_idempotency \
+                     (flow_name, scope_key, idempotency_key, request_hash, state, expires_at, created_at, updated_at) \
+                     VALUES ($1, $2, $3, $4, 'processing', $5, $6, $6) \
+                     ON CONFLICT (flow_name, scope_key, idempotency_key) DO NOTHING"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .bind(request_hash)
+                .bind(expires_at)
+                .bind(now)
+                .execute(&mut **connection)
+                .await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Mysql(connection) => {
+                sqlx::query(
+                    "INSERT INTO _axis_idempotency \
+                     (flow_name, scope_key, idempotency_key, request_hash, state, expires_at, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, 'processing', ?, ?, ?) \
+                     ON DUPLICATE KEY UPDATE updated_at = updated_at"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .bind(request_hash)
+                .bind(expires_at)
+                .bind(now)
+                .bind(now)
+                .execute(&mut **connection)
+                .await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Sqlite(connection) => {
+                sqlx::query(
+                    "INSERT INTO _axis_idempotency \
+                     (flow_name, scope_key, idempotency_key, request_hash, state, expires_at, created_at, updated_at) \
+                     VALUES (?, ?, ?, ?, 'processing', ?, ?, ?) \
+                     ON CONFLICT (flow_name, scope_key, idempotency_key) DO NOTHING"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .bind(request_hash)
+                .bind(expires_at)
+                .bind(now)
+                .bind(now)
+                .execute(&mut **connection)
+                .await
+                .map(|result| result.rows_affected())
+            }
+        };
+        result
+            .map(|affected| affected == 1)
+            .map_err(|e| FlowErr::Internal(format!("reserve idempotency key: {e}")))
+    }
+
+    async fn read_idempotency(
+        &mut self,
+        flow: &str,
+        scope: &str,
+        key: &str,
+    ) -> Result<Option<IdempotencyRecord>, FlowErr> {
+        match self {
+            DbConnection::Postgres(connection) => {
+                let row = sqlx::query(
+                    "SELECT request_hash, state, response_status, response_body, response_headers, expires_at \
+                     FROM _axis_idempotency \
+                     WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .fetch_optional(&mut **connection)
+                .await
+                .map_err(|e| FlowErr::Internal(format!("read idempotency key: {e}")))?;
+                Ok(row.map(|row| IdempotencyRecord {
+                    request_hash: row.get("request_hash"),
+                    state: row.get("state"),
+                    response_status: row.try_get("response_status").ok(),
+                    response_body: row.try_get("response_body").ok(),
+                    response_headers: row.try_get("response_headers").ok(),
+                    expires_at: row.get("expires_at"),
+                }))
+            }
+            DbConnection::Mysql(connection) => {
+                let row = sqlx::query(
+                    "SELECT request_hash, state, response_status, response_body, response_headers, expires_at \
+                     FROM _axis_idempotency \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ?"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .fetch_optional(&mut **connection)
+                .await
+                .map_err(|e| FlowErr::Internal(format!("read idempotency key: {e}")))?;
+                Ok(row.map(|row| IdempotencyRecord {
+                    request_hash: row.get("request_hash"),
+                    state: row.get("state"),
+                    response_status: row.try_get("response_status").ok(),
+                    response_body: row.try_get("response_body").ok(),
+                    response_headers: row.try_get("response_headers").ok(),
+                    expires_at: row.get("expires_at"),
+                }))
+            }
+            DbConnection::Sqlite(connection) => {
+                let row = sqlx::query(
+                    "SELECT request_hash, state, response_status, response_body, response_headers, expires_at \
+                     FROM _axis_idempotency \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ?"
+                )
+                .bind(flow)
+                .bind(scope)
+                .bind(key)
+                .fetch_optional(&mut **connection)
+                .await
+                .map_err(|e| FlowErr::Internal(format!("read idempotency key: {e}")))?;
+                Ok(row.map(|row| IdempotencyRecord {
+                    request_hash: row.get("request_hash"),
+                    state: row.get("state"),
+                    response_status: row.try_get("response_status").ok(),
+                    response_body: row.try_get("response_body").ok(),
+                    response_headers: row.try_get("response_headers").ok(),
+                    expires_at: row.get("expires_at"),
+                }))
+            }
+        }
+    }
+
+    async fn delete_expired_idempotency(
+        &mut self,
+        flow: &str,
+        scope: &str,
+        key: &str,
+        now: i64,
+    ) -> Result<bool, FlowErr> {
+        let result = match self {
+            DbConnection::Postgres(connection) => {
+                sqlx::query(
+                    "DELETE FROM _axis_idempotency \
+                     WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3 AND expires_at <= $4"
+                )
+                .bind(flow).bind(scope).bind(key).bind(now)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Mysql(connection) => {
+                sqlx::query(
+                    "DELETE FROM _axis_idempotency \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ? AND expires_at <= ?"
+                )
+                .bind(flow).bind(scope).bind(key).bind(now)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Sqlite(connection) => {
+                sqlx::query(
+                    "DELETE FROM _axis_idempotency \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ? AND expires_at <= ?"
+                )
+                .bind(flow).bind(scope).bind(key).bind(now)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+        };
+        result
+            .map(|affected| affected == 1)
+            .map_err(|e| FlowErr::Internal(format!("expire idempotency key: {e}")))
+    }
+
+    async fn cleanup_expired_idempotency(&mut self, now: i64) -> Result<(), FlowErr> {
+        let result = match self {
+            DbConnection::Postgres(connection) => {
+                sqlx::query("DELETE FROM _axis_idempotency WHERE expires_at <= $1")
+                    .bind(now)
+                    .execute(&mut **connection)
+                    .await
                     .map(|_| ())
-                    .map_err(|e| e.to_string())
+            }
+            DbConnection::Mysql(connection) => {
+                sqlx::query("DELETE FROM _axis_idempotency WHERE expires_at <= ?")
+                    .bind(now)
+                    .execute(&mut **connection)
+                    .await
+                    .map(|_| ())
+            }
+            DbConnection::Sqlite(connection) => {
+                sqlx::query("DELETE FROM _axis_idempotency WHERE expires_at <= ?")
+                    .bind(now)
+                    .execute(&mut **connection)
+                    .await
+                    .map(|_| ())
+            }
+        };
+        result
+            .map(|_| ())
+            .map_err(|e| FlowErr::Internal(format!("clean up idempotency keys: {e}")))
+    }
+
+    async fn complete_idempotency(
+        &mut self,
+        flow: &str,
+        scope: &str,
+        key: &str,
+        response: &IdempotencyCompletion,
+    ) -> Result<(), FlowErr> {
+        let affected = match self {
+            DbConnection::Postgres(connection) => {
+                sqlx::query(
+                    "UPDATE _axis_idempotency \
+                     SET state = 'completed', response_status = $4, response_body = $5, response_headers = $6, updated_at = $7 \
+                     WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3 AND state = 'processing'"
+                )
+                .bind(flow).bind(scope).bind(key).bind(response.status).bind(&response.body).bind(&response.headers).bind(response.completed_at)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Mysql(connection) => {
+                sqlx::query(
+                    "UPDATE _axis_idempotency \
+                     SET state = 'completed', response_status = ?, response_body = ?, response_headers = ?, updated_at = ? \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ? AND state = 'processing'"
+                )
+                .bind(response.status).bind(&response.body).bind(&response.headers).bind(response.completed_at).bind(flow).bind(scope).bind(key)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+            DbConnection::Sqlite(connection) => {
+                sqlx::query(
+                    "UPDATE _axis_idempotency \
+                     SET state = 'completed', response_status = ?, response_body = ?, response_headers = ?, updated_at = ? \
+                     WHERE flow_name = ? AND scope_key = ? AND idempotency_key = ? AND state = 'processing'"
+                )
+                .bind(response.status).bind(&response.body).bind(&response.headers).bind(response.completed_at).bind(flow).bind(scope).bind(key)
+                .execute(&mut **connection).await
+                .map(|result| result.rows_affected())
+            }
+        }
+        .map_err(|e| FlowErr::Internal(format!("complete idempotency key: {e}")))?;
+        if affected != 1 {
+            return Err(FlowErr::Internal(
+                "idempotency record changed during transaction".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn commit(self) -> Result<(), FlowErr> {
+        let result = match self {
+            DbConnection::Postgres(transaction) => transaction.commit().await,
+            DbConnection::Mysql(transaction) => transaction.commit().await,
+            DbConnection::Sqlite(transaction) => transaction.commit().await,
+        };
+        result.map_err(|e| FlowErr::Internal(format!("commit transaction: {e}")))
+    }
+
+    async fn rollback(self) {
+        match self {
+            DbConnection::Postgres(transaction) => {
+                let _ = transaction.rollback().await;
+            }
+            DbConnection::Mysql(transaction) => {
+                let _ = transaction.rollback().await;
+            }
+            DbConnection::Sqlite(transaction) => {
+                let _ = transaction.rollback().await;
             }
         }
     }
 }
 
-async fn connect_backend(url: &str, stype: SourceType) -> Result<DbBackend, Box<dyn std::error::Error>> {
+async fn connect_backend(
+    url: &str,
+    stype: SourceType,
+) -> Result<DbBackend, Box<dyn std::error::Error>> {
     let backend = match stype {
-        SourceType::Mysql => {
-            DbBackend::Mysql(MySqlPoolOptions::new()
+        SourceType::Mysql => DbBackend::Mysql(
+            MySqlPoolOptions::new()
                 .max_connections(10)
                 .connect(url)
-                .await?)
-        }
+                .await?,
+        ),
         SourceType::Sqlite => {
-            DbBackend::Sqlite(SqlitePoolOptions::new()
-                .max_connections(5)
-                .connect(url)
-                .await?)
+            let max_connections = if url == "sqlite::memory:"
+                || url == "sqlite://:memory:"
+                || url.ends_with("mode=memory")
+            {
+                1
+            } else {
+                5
+            };
+            DbBackend::Sqlite(
+                SqlitePoolOptions::new()
+                    .max_connections(max_connections)
+                    .connect(url)
+                    .await?,
+            )
         }
-        _ => {
-            DbBackend::Postgres(PgPoolOptions::new()
+        _ => DbBackend::Postgres(
+            PgPoolOptions::new()
                 .max_connections(10)
                 .connect(url)
-                .await?)
-        }
+                .await?,
+        ),
     };
     Ok(backend)
 }
 
 struct AppState {
     dbs: HashMap<String, DbBackend>,
+    db_urls: HashMap<String, String>,
     #[cfg(feature = "redis-port")]
     redis_sources: HashMap<String, RedisPort>,
     program: Program,
@@ -261,6 +850,7 @@ struct AppState {
     default_locale: String,
     metrics: Mutex<MetricsData>,
     storages: HashMap<String, StorageConfig>,
+    idempotency_cleanup: Mutex<Instant>,
 }
 
 struct StorageConfig {
@@ -270,6 +860,27 @@ struct StorageConfig {
     access: StorageAccess,
     max_size: Option<i64>,
     types: Vec<String>,
+    s3: Option<Arc<dyn ObjectStore>>,
+}
+
+fn build_storage_config(storage: &StorageDef) -> Result<StorageConfig, Box<dyn std::error::Error>> {
+    let s3: Option<Arc<dyn ObjectStore>> = match storage.backend {
+        StorageBackend::Local => None,
+        StorageBackend::S3 => Some(Arc::new(
+            AmazonS3Builder::from_env()
+                .with_bucket_name(&storage.bucket)
+                .build()?,
+        )),
+    };
+    Ok(StorageConfig {
+        backend: storage.backend.clone(),
+        bucket: storage.bucket.clone(),
+        prefix: storage.prefix.clone(),
+        access: storage.access.clone(),
+        max_size: storage.max_size,
+        types: storage.types.clone(),
+        s3,
+    })
 }
 
 struct AdapterConfig {
@@ -288,7 +899,9 @@ struct AdapterRegistry {
 
 impl AdapterRegistry {
     fn new() -> Self {
-        Self { adapters: HashMap::new() }
+        Self {
+            adapters: HashMap::new(),
+        }
     }
 
     fn load_dir(dir: &std::path::Path) -> Self {
@@ -317,14 +930,23 @@ impl AdapterRegistry {
     }
 
     fn load_adapter(&mut self, json: &Value) {
-        let Some(name) = json.get("name").and_then(|v| v.as_str()) else { return };
+        let Some(name) = json.get("name").and_then(|v| v.as_str()) else {
+            return;
+        };
         let mut endpoints = HashMap::new();
         if let Some(eps) = json.get("endpoints").and_then(|v| v.as_object()) {
             for (k, v) in eps {
-                endpoints.insert(k.clone(), AdapterEndpoint {
-                    method: v.get("method").and_then(|m| m.as_str()).unwrap_or("POST").into(),
-                    url: v.get("url").and_then(|u| u.as_str()).unwrap_or("").into(),
-                });
+                endpoints.insert(
+                    k.clone(),
+                    AdapterEndpoint {
+                        method: v
+                            .get("method")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("POST")
+                            .into(),
+                        url: v.get("url").and_then(|u| u.as_str()).unwrap_or("").into(),
+                    },
+                );
             }
         }
         let mut config = HashMap::new();
@@ -337,10 +959,8 @@ impl AdapterRegistry {
             }
         }
         info!("adapter '{}': {} endpoints", name, endpoints.len());
-        self.adapters.insert(name.into(), AdapterConfig {
-            endpoints,
-            config,
-        });
+        self.adapters
+            .insert(name.into(), AdapterConfig { endpoints, config });
     }
 
     fn get(&self, name: &str) -> Option<&AdapterConfig> {
@@ -352,7 +972,11 @@ impl AdapterRegistry {
         if manifest.exists() {
             if let Ok(data) = std::fs::read_to_string(&manifest) {
                 if let Ok(json) = serde_json::from_str::<Value>(&data) {
-                    let name = json.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = json
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     self.load_adapter(&json);
                     info!("hot-reloaded adapter '{}'", name);
                 }
@@ -377,7 +1001,10 @@ struct MetricsData {
 impl MetricsData {
     fn record(&mut self, flow: &str, method: &str, status: u16, duration_secs: f64) {
         let key = format!("{}:{}", flow, method);
-        *self.request_total.entry(format!("{key}:{status}")).or_default() += 1;
+        *self
+            .request_total
+            .entry(format!("{key}:{status}"))
+            .or_default() += 1;
         if status >= 400 {
             *self.error_total.entry(key.clone()).or_default() += 1;
         }
@@ -388,7 +1015,11 @@ impl MetricsData {
     fn render_prometheus(&self) -> String {
         let mut out = String::new();
 
-        writeln!(out, "# HELP axis_request_total Total HTTP requests per flow/method/status").unwrap();
+        writeln!(
+            out,
+            "# HELP axis_request_total Total HTTP requests per flow/method/status"
+        )
+        .unwrap();
         writeln!(out, "# TYPE axis_request_total counter").unwrap();
         let mut keys: Vec<_> = self.request_total.keys().collect();
         keys.sort();
@@ -396,13 +1027,21 @@ impl MetricsData {
             let count = self.request_total[key];
             let parts: Vec<&str> = key.splitn(3, ':').collect();
             if parts.len() == 3 {
-                writeln!(out, "axis_request_total{{flow=\"{}\",method=\"{}\",status=\"{}\"}} {count}",
-                    parts[0], parts[1], parts[2]).unwrap();
+                writeln!(
+                    out,
+                    "axis_request_total{{flow=\"{}\",method=\"{}\",status=\"{}\"}} {count}",
+                    parts[0], parts[1], parts[2]
+                )
+                .unwrap();
             }
         }
 
         writeln!(out).unwrap();
-        writeln!(out, "# HELP axis_error_total Total error responses per flow/method").unwrap();
+        writeln!(
+            out,
+            "# HELP axis_error_total Total error responses per flow/method"
+        )
+        .unwrap();
         writeln!(out, "# TYPE axis_error_total counter").unwrap();
         let mut keys: Vec<_> = self.error_total.keys().collect();
         keys.sort();
@@ -410,13 +1049,21 @@ impl MetricsData {
             let count = self.error_total[key];
             let parts: Vec<&str> = key.splitn(2, ':').collect();
             if parts.len() == 2 {
-                writeln!(out, "axis_error_total{{flow=\"{}\",method=\"{}\"}} {count}",
-                    parts[0], parts[1]).unwrap();
+                writeln!(
+                    out,
+                    "axis_error_total{{flow=\"{}\",method=\"{}\"}} {count}",
+                    parts[0], parts[1]
+                )
+                .unwrap();
             }
         }
 
         writeln!(out).unwrap();
-        writeln!(out, "# HELP axis_request_duration_seconds Total request duration per flow/method").unwrap();
+        writeln!(
+            out,
+            "# HELP axis_request_duration_seconds Total request duration per flow/method"
+        )
+        .unwrap();
         writeln!(out, "# TYPE axis_request_duration_seconds summary").unwrap();
         let mut keys: Vec<_> = self.latency_sum.keys().collect();
         keys.sort();
@@ -425,10 +1072,18 @@ impl MetricsData {
             let count = self.latency_count.get(key).copied().unwrap_or(0);
             let parts: Vec<&str> = key.splitn(2, ':').collect();
             if parts.len() == 2 {
-                writeln!(out, "axis_request_duration_seconds_sum{{flow=\"{}\",method=\"{}\"}} {sum:.6}",
-                    parts[0], parts[1]).unwrap();
-                writeln!(out, "axis_request_duration_seconds_count{{flow=\"{}\",method=\"{}\"}} {count}",
-                    parts[0], parts[1]).unwrap();
+                writeln!(
+                    out,
+                    "axis_request_duration_seconds_sum{{flow=\"{}\",method=\"{}\"}} {sum:.6}",
+                    parts[0], parts[1]
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "axis_request_duration_seconds_count{{flow=\"{}\",method=\"{}\"}} {count}",
+                    parts[0], parts[1]
+                )
+                .unwrap();
             }
         }
 
@@ -444,11 +1099,29 @@ struct Ctx {
     bindings: HashMap<String, Value>,
     claims: Value,
     tenant: Option<(String, Value)>,
+    transaction: Option<DbConnection>,
+    pending_effects: Vec<Value>,
 }
 
 enum FlowErr {
     Http(StatusCode, String),
     Internal(String),
+}
+
+struct IdempotencyRecord {
+    request_hash: String,
+    state: String,
+    response_status: Option<i64>,
+    response_body: Option<String>,
+    response_headers: Option<String>,
+    expires_at: i64,
+}
+
+struct IdempotencyCompletion {
+    status: i64,
+    body: String,
+    headers: String,
+    completed_at: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -492,10 +1165,15 @@ fn init_logging() {
         .try_init();
 }
 
-pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn serve(
+    dir: &Path,
+    port: u16,
+    opts: ServeOpts,
+) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
 
-    let compile_dir_buf = opts.src_dir
+    let compile_dir_buf = opts
+        .src_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             let src = dir.join("src");
@@ -523,19 +1201,27 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
             || matches!(c, Construct::Saga(s) if s.auth.is_some())
     });
 
-    let sql_sources: Vec<(&str, SourceType)> = result.program.constructs.iter().filter_map(|c| {
-        if let Construct::Source(s) = c {
-            match s.source_type {
-                SourceType::Postgres | SourceType::Mysql | SourceType::Sqlite => Some((s.name.as_str(), s.source_type)),
-                _ => None,
+    let sql_sources: Vec<(&str, SourceType)> = result
+        .program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Source(s) = c {
+                match s.source_type {
+                    SourceType::Postgres | SourceType::Mysql | SourceType::Sqlite => {
+                        Some((s.name.as_str(), s.source_type))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
             }
-        } else {
-            None
-        }
-    }).collect();
+        })
+        .collect();
 
     let default_url = opts.db_url.unwrap_or_default();
     let mut dbs: HashMap<String, DbBackend> = HashMap::new();
+    let mut db_urls: HashMap<String, String> = HashMap::new();
 
     for (name, stype) in &sql_sources {
         let env_key = format!("{}_DATABASE_URL", name.to_uppercase());
@@ -545,6 +1231,7 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
         }
         let backend = connect_backend(&url, *stype).await?;
         dbs.insert(name.to_string(), backend);
+        db_urls.insert(name.to_string(), url);
     }
 
     #[cfg(feature = "redis-port")]
@@ -601,16 +1288,19 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
         .build()
         .expect("failed to build HTTP client");
 
-    let adapters_dir = opts.adapters_dir
+    let adapters_dir = opts
+        .adapters_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| dir.join("adapters"));
     let adapter_registry = AdapterRegistry::load_dir(&adapters_dir);
     let adapters = Arc::new(tokio::sync::RwLock::new(adapter_registry));
 
-    let templates_dir = opts.templates_dir
+    let templates_dir = opts
+        .templates_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| dir.join("templates"));
-    let locales_dir = opts.locales_dir
+    let locales_dir = opts
+        .locales_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| dir.join("locales"));
     let templates = load_templates(&templates_dir);
@@ -619,19 +1309,13 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
     let mut storages = HashMap::new();
     for c in &result.program.constructs {
         if let Construct::Storage(s) = c {
-            storages.insert(s.name.clone(), StorageConfig {
-                backend: s.backend.clone(),
-                bucket: s.bucket.clone(),
-                prefix: s.prefix.clone(),
-                access: s.access.clone(),
-                max_size: s.max_size,
-                types: s.types.clone(),
-            });
+            storages.insert(s.name.clone(), build_storage_config(s)?);
         }
     }
 
     let state = Arc::new(AppState {
         dbs,
+        db_urls,
         #[cfg(feature = "redis-port")]
         redis_sources,
         program: result.program,
@@ -648,6 +1332,11 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
         default_locale,
         metrics: Mutex::new(MetricsData::default()),
         storages,
+        idempotency_cleanup: Mutex::new(
+            Instant::now()
+                .checked_sub(StdDuration::from_secs(3600))
+                .unwrap_or_else(Instant::now),
+        ),
     });
 
     // hot-swap watcher for adapters directory
@@ -713,11 +1402,10 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
         for &(idx, method) in group {
             let new_mr = if has_path_params {
                 let h = move |State(st): State<Arc<AppState>>,
-                              headers: HeaderMap,
                               extract::Path(pp): extract::Path<HashMap<String, String>>,
                               Query(qp): Query<HashMap<String, String>>,
-                              body: Option<Json<Value>>| async move {
-                    handle_route(&st, idx, pp, qp, body.map(|b| b.0), headers).await
+                              request: extract::Request| async move {
+                    dispatch_request(st, idx, pp, qp, request).await
                 };
                 match mr {
                     Some(m) => m.on(method, h),
@@ -725,10 +1413,9 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
                 }
             } else {
                 let h = move |State(st): State<Arc<AppState>>,
-                              headers: HeaderMap,
                               Query(qp): Query<HashMap<String, String>>,
-                              body: Option<Json<Value>>| async move {
-                    handle_route(&st, idx, HashMap::new(), qp, body.map(|b| b.0), headers).await
+                              request: extract::Request| async move {
+                    dispatch_request(st, idx, HashMap::new(), qp, request).await
                 };
                 match mr {
                     Some(m) => m.on(method, h),
@@ -761,8 +1448,7 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
                     router = router.route(
                         &path,
                         get(
-                            move |State(st): State<Arc<AppState>>,
-                                  headers: HeaderMap| async move {
+                            move |State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
                                 sse_handler(st, headers, idx).await
                             },
                         ),
@@ -772,19 +1458,7 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
         }
     }
 
-    for (name, cfg) in &state.storages {
-        if cfg.access == StorageAccess::Public && cfg.backend == StorageBackend::Local {
-            let serve_path = format!("/files/{}", cfg.prefix.as_deref().unwrap_or(&cfg.bucket));
-            let dir = std::path::Path::new(&cfg.bucket).join(cfg.prefix.as_deref().unwrap_or(""));
-            if dir.exists() {
-                info!(storage = %name, path = %serve_path, "serving public files");
-            }
-            router = router.nest_service(
-                &serve_path,
-                tower_http::services::ServeDir::new(&dir),
-            );
-        }
-    }
+    router = mount_public_storages(router, &state);
 
     let app = build_app(router, state);
 
@@ -796,11 +1470,44 @@ pub async fn serve(dir: &Path, port: u16, opts: ServeOpts) -> Result<(), Box<dyn
     Ok(())
 }
 
-fn build_app(
-    router: Router<Arc<AppState>>,
-    state: Arc<AppState>,
-) -> Router {
-    router.layer(CorsLayer::permissive()).with_state(state)
+fn build_app(router: Router<Arc<AppState>>, state: Arc<AppState>) -> Router {
+    let declared_upload_limit = state
+        .storages
+        .values()
+        .map(|storage| {
+            storage
+                .max_size
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(64 * 1024 * 1024)
+        })
+        .max()
+        .unwrap_or(1024 * 1024);
+    let default_limit = declared_upload_limit.saturating_add(1024 * 1024);
+    let body_limit = std::env::var("AXIS_MAX_REQUEST_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default_limit);
+    router
+        .layer(axum::extract::DefaultBodyLimit::max(body_limit))
+        .layer(CorsLayer::permissive())
+        .with_state(state)
+}
+
+fn mount_public_storages(
+    mut router: Router<Arc<AppState>>,
+    state: &AppState,
+) -> Router<Arc<AppState>> {
+    for (name, config) in &state.storages {
+        if config.access == StorageAccess::Public && config.backend == StorageBackend::Local {
+            let serve_path = format!("/files/{name}");
+            let directory = std::path::Path::new(&config.bucket);
+            info!(storage = %name, path = %serve_path, "serving public files");
+            router =
+                router.nest_service(&serve_path, tower_http::services::ServeDir::new(directory));
+        }
+    }
+    router
 }
 
 pub async fn build_app_from_source(
@@ -815,23 +1522,31 @@ pub async fn build_app_from_source(
         return Err(format!("verification: {} errors", vr.error_count()).into());
     }
 
-    let sql_sources: Vec<(&str, SourceType)> = program.constructs.iter().filter_map(|c| {
-        if let Construct::Source(s) = c {
-            match s.source_type {
-                SourceType::Postgres | SourceType::Mysql | SourceType::Sqlite => Some((s.name.as_str(), s.source_type)),
-                _ => None,
+    let sql_sources: Vec<(&str, SourceType)> = program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Source(s) = c {
+                match s.source_type {
+                    SourceType::Postgres | SourceType::Mysql | SourceType::Sqlite => {
+                        Some((s.name.as_str(), s.source_type))
+                    }
+                    _ => None,
+                }
+            } else {
+                None
             }
-        } else {
-            None
-        }
-    }).collect();
+        })
+        .collect();
 
     let mut dbs: HashMap<String, DbBackend> = HashMap::new();
+    let mut db_urls: HashMap<String, String> = HashMap::new();
     for (name, stype) in &sql_sources {
         let env_key = format!("{}_DATABASE_URL", name.to_uppercase());
         let url = std::env::var(&env_key).unwrap_or_else(|_| db_url.to_string());
         let backend = connect_backend(&url, *stype).await?;
         dbs.insert(name.to_string(), backend);
+        db_urls.insert(name.to_string(), url);
     }
 
     auto_create_tables(&program, &dbs).await?;
@@ -842,26 +1557,24 @@ pub async fn build_app_from_source(
     let mut funcs = HashMap::new();
     let mut services = HashMap::new();
     for (i, c) in program.constructs.iter().enumerate() {
-        if let Construct::Func(f) = c { funcs.insert(f.name.clone(), i); }
-        if let Construct::Service(s) = c { services.insert(s.name.clone(), i); }
+        if let Construct::Func(f) = c {
+            funcs.insert(f.name.clone(), i);
+        }
+        if let Construct::Service(s) = c {
+            services.insert(s.name.clone(), i);
+        }
     }
 
     let mut test_storages = HashMap::new();
     for c in &program.constructs {
         if let Construct::Storage(s) = c {
-            test_storages.insert(s.name.clone(), StorageConfig {
-                backend: s.backend.clone(),
-                bucket: s.bucket.clone(),
-                prefix: s.prefix.clone(),
-                access: s.access.clone(),
-                max_size: s.max_size,
-                types: s.types.clone(),
-            });
+            test_storages.insert(s.name.clone(), build_storage_config(s)?);
         }
     }
 
     let state = Arc::new(AppState {
         dbs,
+        db_urls,
         #[cfg(feature = "redis-port")]
         redis_sources: HashMap::new(),
         program,
@@ -872,12 +1585,19 @@ pub async fn build_app_from_source(
         funcs,
         services,
         http_client: reqwest::Client::new(),
-        adapters: Arc::new(tokio::sync::RwLock::new(AdapterRegistry { adapters: HashMap::new() })),
+        adapters: Arc::new(tokio::sync::RwLock::new(AdapterRegistry {
+            adapters: HashMap::new(),
+        })),
         templates: HashMap::new(),
         locales: HashMap::new(),
         default_locale: "en".into(),
         metrics: Mutex::new(MetricsData::default()),
         storages: test_storages,
+        idempotency_cleanup: Mutex::new(
+            Instant::now()
+                .checked_sub(StdDuration::from_secs(3600))
+                .unwrap_or_else(Instant::now),
+        ),
     });
 
     let mut path_groups: HashMap<String, Vec<(usize, MethodFilter)>> = HashMap::new();
@@ -906,26 +1626,32 @@ pub async fn build_app_from_source(
         for &(idx, method) in group {
             let new_mr = if has_path_params {
                 let h = move |State(st): State<Arc<AppState>>,
-                              headers: HeaderMap,
                               extract::Path(pp): extract::Path<HashMap<String, String>>,
                               Query(qp): Query<HashMap<String, String>>,
-                              body: Option<Json<Value>>| async move {
-                    handle_route(&st, idx, pp, qp, body.map(|b| b.0), headers).await
+                              request: extract::Request| async move {
+                    dispatch_request(st, idx, pp, qp, request).await
                 };
-                match mr { Some(m) => m.on(method, h), None => on(method, h) }
+                match mr {
+                    Some(m) => m.on(method, h),
+                    None => on(method, h),
+                }
             } else {
                 let h = move |State(st): State<Arc<AppState>>,
-                              headers: HeaderMap,
                               Query(qp): Query<HashMap<String, String>>,
-                              body: Option<Json<Value>>| async move {
-                    handle_route(&st, idx, HashMap::new(), qp, body.map(|b| b.0), headers).await
+                              request: extract::Request| async move {
+                    dispatch_request(st, idx, HashMap::new(), qp, request).await
                 };
-                match mr { Some(m) => m.on(method, h), None => on(method, h) }
+                match mr {
+                    Some(m) => m.on(method, h),
+                    None => on(method, h),
+                }
             };
             mr = Some(new_mr);
         }
         router = router.route(path, mr.unwrap());
     }
+
+    router = mount_public_storages(router, &state);
 
     Ok(build_app(router, state))
 }
@@ -961,7 +1687,10 @@ fn to_method_filter(m: &HttpMethod) -> MethodFilter {
 async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let data = state.metrics.lock().unwrap();
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         data.render_prometheus(),
     )
 }
@@ -997,18 +1726,13 @@ fn check_auth(
             let key = headers
                 .get("x-api-key")
                 .and_then(|v| v.to_str().ok())
-                .ok_or_else(|| {
-                    FlowErr::Http(StatusCode::UNAUTHORIZED, "missing api key".into())
-                })?;
+                .ok_or_else(|| FlowErr::Http(StatusCode::UNAUTHORIZED, "missing api key".into()))?;
             Ok(serde_json::json!({ "api_key": key }))
         }
         AuthDecl::Role(role) => {
             let token = extract_bearer(headers)?;
             let claims = decode_jwt(&token, jwt_secret)?;
-            let user_role = claims
-                .get("role")
-                .and_then(|r| r.as_str())
-                .unwrap_or("");
+            let user_role = claims.get("role").and_then(|r| r.as_str()).unwrap_or("");
             if user_role == role {
                 Ok(claims)
             } else {
@@ -1021,10 +1745,7 @@ fn check_auth(
         AuthDecl::RoleIn(roles) => {
             let token = extract_bearer(headers)?;
             let claims = decode_jwt(&token, jwt_secret)?;
-            let user_role = claims
-                .get("role")
-                .and_then(|r| r.as_str())
-                .unwrap_or("");
+            let user_role = claims.get("role").and_then(|r| r.as_str()).unwrap_or("");
             if roles.iter().any(|r| r == user_role) {
                 Ok(claims)
             } else {
@@ -1052,20 +1773,15 @@ fn extract_bearer(headers: &HeaderMap) -> Result<String, FlowErr> {
 }
 
 fn decode_jwt(token: &str, secret: &str) -> Result<Value, FlowErr> {
-    use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+    use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     let key = DecodingKey::from_secret(secret.as_bytes());
     let validation = Validation::new(Algorithm::HS256);
     let data = decode::<HashMap<String, Value>>(token, &key, &validation)
         .map_err(|e| FlowErr::Http(StatusCode::UNAUTHORIZED, format!("invalid token: {e}")))?;
-    serde_json::to_value(data.claims)
-        .map_err(|e| FlowErr::Internal(format!("claims: {e}")))
+    serde_json::to_value(data.claims).map_err(|e| FlowErr::Internal(format!("claims: {e}")))
 }
 
-fn verify_webhook(
-    headers: &HeaderMap,
-    body_bytes: &[u8],
-    secret: &str,
-) -> Result<Value, FlowErr> {
+fn verify_webhook(headers: &HeaderMap, body_bytes: &[u8], secret: &str) -> Result<Value, FlowErr> {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 
@@ -1153,6 +1869,143 @@ fn rate_key(flow_name: &str, limit: &LimitDecl, ctx: &Ctx) -> String {
 // route dispatch
 // ---------------------------------------------------------------------------
 
+fn route_body(program: &Program, idx: usize) -> Option<&BodyDecl> {
+    match program.constructs.get(idx) {
+        Some(Construct::Flow(flow)) => flow.body.as_ref(),
+        Some(Construct::Saga(saga)) => saga.body.as_ref(),
+        _ => None,
+    }
+}
+
+fn multipart_text_value(value: String, ty: &TypeExpr) -> Result<Value, String> {
+    match ty {
+        TypeExpr::Maybe(inner) => multipart_text_value(value, inner),
+        TypeExpr::Int { .. } => value
+            .parse::<i64>()
+            .map(Value::from)
+            .map_err(|_| "expected an integer".into()),
+        TypeExpr::Bool => value
+            .parse::<bool>()
+            .map(Value::from)
+            .map_err(|_| "expected true or false".into()),
+        TypeExpr::Json | TypeExpr::List(_) | TypeExpr::Map(_, _) => {
+            serde_json::from_str(&value).map_err(|_| "expected valid JSON".into())
+        }
+        _ => Ok(Value::String(value)),
+    }
+}
+
+async fn parse_route_body(
+    program: &Program,
+    idx: usize,
+    request: extract::Request,
+) -> Result<Option<Value>, (StatusCode, String)> {
+    let Some(body_decl) = route_body(program, idx) else {
+        return Ok(None);
+    };
+
+    let value = match body_decl.kind {
+        BodyKind::Json => Json::<Value>::from_request(request, &())
+            .await
+            .map(|Json(value)| value)
+            .map_err(|error| (error.status(), error.body_text()))?,
+        BodyKind::Multipart => {
+            let mut multipart = Multipart::from_request(request, &())
+                .await
+                .map_err(|error| (error.status(), error.body_text()))?;
+            let mut values = serde_json::Map::new();
+            while let Some(field) = multipart.next_field().await.map_err(|error| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("invalid multipart body: {error}"),
+                )
+            })? {
+                let Some(name) = field.name().map(str::to_owned) else {
+                    continue;
+                };
+                let Some(declaration) = body_decl.fields.iter().find(|item| item.name == name)
+                else {
+                    return Err((
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        format!("unexpected multipart field: {name}"),
+                    ));
+                };
+                if matches!(declaration.ty, TypeExpr::Blob)
+                    || matches!(declaration.ty, TypeExpr::Maybe(ref inner) if matches!(inner.as_ref(), TypeExpr::Blob))
+                {
+                    let filename = field.file_name().map(str::to_owned);
+                    let content_type = field.content_type().map(ToString::to_string);
+                    let bytes = field.bytes().await.map_err(|error| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            format!("invalid multipart file: {error}"),
+                        )
+                    })?;
+                    values.insert(
+                        name,
+                        serde_json::json!({
+                            "data_base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                            "filename": filename,
+                            "content_type": content_type,
+                        }),
+                    );
+                } else {
+                    let text = field.text().await.map_err(|error| {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            format!("invalid multipart field: {error}"),
+                        )
+                    })?;
+                    let parsed =
+                        multipart_text_value(text, &declaration.ty).map_err(|message| {
+                            (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                format!("{}: {message}", declaration.name),
+                            )
+                        })?;
+                    values.insert(name, parsed);
+                }
+            }
+            Value::Object(values)
+        }
+    };
+
+    let object = value.as_object().ok_or_else(|| {
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "request body must be an object".into(),
+        )
+    })?;
+    for field in &body_decl.fields {
+        if field
+            .modifiers
+            .iter()
+            .any(|modifier| matches!(modifier, Modifier::Required))
+            && object.get(&field.name).is_none_or(Value::is_null)
+        {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                format!("{} is required", field.name),
+            ));
+        }
+    }
+    Ok(Some(value))
+}
+
+async fn dispatch_request(
+    state: Arc<AppState>,
+    idx: usize,
+    path_params: HashMap<String, String>,
+    query_params: HashMap<String, String>,
+    request: extract::Request,
+) -> Response {
+    let headers = request.headers().clone();
+    match parse_route_body(&state.program, idx, request).await {
+        Ok(body) => handle_route(&state, idx, path_params, query_params, body, headers).await,
+        Err((status, message)) => err_resp(status, &message),
+    }
+}
+
 async fn handle_route(
     state: &AppState,
     idx: usize,
@@ -1171,12 +2024,8 @@ async fn handle_route(
     tracing::info!(target: "axis::request", method = %method_str, path = %flow_path, flow = %flow_name, "request");
 
     let resp = match &state.program.constructs[idx] {
-        Construct::Flow(_) => {
-            run_flow(state, idx, path_params, query_params, body, headers).await
-        }
-        Construct::Saga(_) => {
-            run_saga(state, idx, path_params, query_params, body, headers).await
-        }
+        Construct::Flow(_) => run_flow(state, idx, path_params, query_params, body, headers).await,
+        Construct::Saga(_) => run_saga(state, idx, path_params, query_params, body, headers).await,
         _ => unreachable!(),
     };
 
@@ -1193,6 +2042,377 @@ async fn handle_route(
 // ---------------------------------------------------------------------------
 // run flow
 // ---------------------------------------------------------------------------
+
+enum IdempotencyStart {
+    Acquired {
+        connection: DbConnection,
+        scope: String,
+        key: String,
+    },
+    Replay(Response),
+}
+
+fn push_source(sources: &mut Vec<String>, source: &str) {
+    if !sources.iter().any(|existing| existing == source) {
+        sources.push(source.to_string());
+    }
+}
+
+fn collect_expr_sources(expr: &Expr, sources: &mut Vec<String>) {
+    match expr {
+        Expr::Fetch {
+            source, filters, ..
+        } => {
+            push_source(sources, source);
+            for filter in filters {
+                collect_expr_sources(&filter.value, sources);
+            }
+        }
+        Expr::Query {
+            source,
+            filters,
+            cursor,
+            page_size,
+            ..
+        } => {
+            push_source(sources, source);
+            for filter in filters {
+                collect_expr_sources(&filter.value, sources);
+            }
+            if let Some(cursor) = cursor {
+                collect_expr_sources(cursor, sources);
+            }
+            if let Some(page_size) = page_size {
+                collect_expr_sources(page_size, sources);
+            }
+        }
+        Expr::Unary { operand, .. }
+        | Expr::Aggregate {
+            source: operand, ..
+        }
+        | Expr::NowOffset {
+            amount: operand, ..
+        }
+        | Expr::Cached { expr: operand, .. }
+        | Expr::MapExpr {
+            source: operand, ..
+        }
+        | Expr::ReduceExpr {
+            source: operand, ..
+        } => collect_expr_sources(operand, sources),
+        Expr::Binary { left, right, .. }
+        | Expr::Coalesce {
+            value: left,
+            default: right,
+        }
+        | Expr::SplitExpr {
+            value: left,
+            delimiter: right,
+        } => {
+            collect_expr_sources(left, sources);
+            collect_expr_sources(right, sources);
+        }
+        Expr::FilterExpr { source, condition } => {
+            collect_expr_sources(source, sources);
+            collect_expr_sources(condition, sources);
+        }
+        Expr::Ternary { a, b, c, .. } => {
+            collect_expr_sources(a, sources);
+            collect_expr_sources(b, sources);
+            collect_expr_sources(c, sources);
+        }
+        Expr::If { cond, then, else_ } => {
+            collect_expr_sources(cond, sources);
+            collect_expr_sources(then, sources);
+            collect_expr_sources(else_, sources);
+        }
+        Expr::Call { args, .. }
+        | Expr::Render { vars: args, .. }
+        | Expr::Translate { vars: args, .. } => {
+            for (_, value) in args {
+                collect_expr_sources(value, sources);
+            }
+        }
+        Expr::ReplaceExpr { value, from, to } => {
+            collect_expr_sources(value, sources);
+            collect_expr_sources(from, sources);
+            collect_expr_sources(to, sources);
+        }
+        Expr::FormatExpr { args, .. } | Expr::FuncCall { args, .. } => {
+            for value in args {
+                collect_expr_sources(value, sources);
+            }
+        }
+        Expr::Literal(_) | Expr::DotPath(_) | Expr::WasmCall { .. } => {}
+    }
+}
+
+fn collect_step_sources(steps: &[FlowStep], sources: &mut Vec<String>) {
+    for step in steps {
+        match step {
+            FlowStep::Let(step) => collect_expr_sources(&step.expr, sources),
+            FlowStep::Set(step) => collect_expr_sources(&step.expr, sources),
+            FlowStep::Guard(step) => collect_expr_sources(&step.expr, sources),
+            FlowStep::Rule(step) => {
+                for requirement in &step.requires {
+                    collect_expr_sources(&requirement.value, sources);
+                }
+            }
+            FlowStep::Insert(step) => {
+                push_source(sources, &step.source);
+                for (_, value) in &step.fields {
+                    collect_expr_sources(value, sources);
+                }
+            }
+            FlowStep::Upsert(step) => {
+                push_source(sources, &step.source);
+                for (_, value) in &step.keys {
+                    collect_expr_sources(value, sources);
+                }
+                for set in &step.sets {
+                    collect_expr_sources(&set.value, sources);
+                }
+            }
+            FlowStep::Update(step) => {
+                push_source(sources, &step.source);
+                for filter in &step.wheres {
+                    collect_expr_sources(&filter.value, sources);
+                }
+                for set in &step.sets {
+                    collect_expr_sources(&set.value, sources);
+                }
+            }
+            FlowStep::Delete(step) => {
+                push_source(sources, &step.source);
+                for filter in &step.wheres {
+                    collect_expr_sources(&filter.value, sources);
+                }
+            }
+            FlowStep::Fanout(step) => {
+                collect_expr_sources(&step.source, sources);
+                push_source(sources, &step.insert.source);
+                for (_, value) in &step.insert.fields {
+                    collect_expr_sources(value, sources);
+                }
+            }
+            FlowStep::Effect(step) => {
+                for field in &step.fields {
+                    match field {
+                        EffectField::To(value) | EffectField::Url(value) => {
+                            collect_expr_sources(value, sources)
+                        }
+                        EffectField::Data(values) => {
+                            for value in values {
+                                collect_expr_sources(value, sources);
+                            }
+                        }
+                        EffectField::Template(_) | EffectField::Event(_) | EffectField::Task(_) => {
+                        }
+                    }
+                }
+            }
+            FlowStep::Match(step) => {
+                for branch in &step.branches {
+                    collect_expr_sources(&branch.condition, sources);
+                    collect_step_sources(&branch.steps, sources);
+                }
+                if let Some(default) = &step.default {
+                    collect_step_sources(default, sources);
+                }
+            }
+            FlowStep::Each(step) => {
+                collect_expr_sources(&step.source, sources);
+                collect_step_sources(&step.steps, sources);
+            }
+            FlowStep::Try(step) => {
+                collect_step_sources(&step.body, sources);
+                collect_step_sources(&step.recover, sources);
+            }
+            FlowStep::Upload(step) => collect_expr_sources(&step.file_expr, sources),
+        }
+    }
+}
+
+fn canonical_json(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.iter().map(canonical_json).collect()),
+        Value::Object(object) => {
+            let mut keys: Vec<&String> = object.keys().collect();
+            keys.sort();
+            let mut canonical = serde_json::Map::new();
+            for key in keys {
+                canonical.insert(key.clone(), canonical_json(&object[key]));
+            }
+            Value::Object(canonical)
+        }
+        _ => value.clone(),
+    }
+}
+
+fn idempotency_request_hash(flow: &FlowDef, ctx: &Ctx) -> String {
+    use sha2::{Digest, Sha256};
+    let request = serde_json::json!({
+        "flow": flow.name,
+        "method": format!("{:?}", flow.method),
+        "path": ctx.path,
+        "query": ctx.query,
+        "body": ctx.body,
+    });
+    let bytes = serde_json::to_vec(&canonical_json(&request)).unwrap_or_default();
+    hex::encode(Sha256::digest(bytes))
+}
+
+fn idempotency_scalar(name: &str, value: Value, max_len: usize) -> Result<String, FlowErr> {
+    let text = match value {
+        Value::String(value) => value,
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => {
+            return Err(FlowErr::Http(
+                StatusCode::BAD_REQUEST,
+                format!("IDEMPOTENCY {name} is required"),
+            ));
+        }
+        Value::Array(_) | Value::Object(_) => {
+            return Err(FlowErr::Http(
+                StatusCode::BAD_REQUEST,
+                format!("IDEMPOTENCY {name} must be a scalar"),
+            ));
+        }
+    };
+    if text.is_empty() || text.len() > max_len {
+        return Err(FlowErr::Http(
+            StatusCode::BAD_REQUEST,
+            format!("IDEMPOTENCY {name} must contain 1 to {max_len} bytes"),
+        ));
+    }
+    Ok(text)
+}
+
+async fn begin_idempotent_flow(
+    state: &AppState,
+    flow: &FlowDef,
+    declaration: &IdempotencyDecl,
+    ctx: &Ctx,
+) -> Result<IdempotencyStart, FlowErr> {
+    let key = idempotency_scalar("key", resolve_dot(&declaration.key, ctx), 255)?;
+    let scope = idempotency_scalar("scope", resolve_dot(&declaration.scope, ctx), 512)?;
+    let request_hash = idempotency_request_hash(flow, ctx);
+
+    let mut sources = Vec::new();
+    collect_step_sources(&flow.steps, &mut sources);
+    if sources.is_empty() {
+        return Err(FlowErr::Internal(format!(
+            "flow '{}' uses IDEMPOTENCY without a database source",
+            flow.name
+        )));
+    }
+    for source in &sources {
+        if !state.dbs.contains_key(source) {
+            return Err(FlowErr::Internal(format!(
+                "flow '{}' cannot provide atomic idempotency because source '{}' is not transactional SQL",
+                flow.name, source
+            )));
+        }
+    }
+    let first = &sources[0];
+    let first_url = state.db_urls.get(first).ok_or_else(|| {
+        FlowErr::Internal(format!("database identity missing for source '{first}'"))
+    })?;
+    if let Some(other) = sources
+        .iter()
+        .find(|source| state.db_urls.get(*source) != Some(first_url))
+    {
+        return Err(FlowErr::Internal(format!(
+            "flow '{}' cannot provide atomic idempotency across databases ('{}' and '{}')",
+            flow.name, first, other
+        )));
+    }
+    let db = require_db(state, first)?;
+    let mut connection = db.begin().await?;
+    let now = chrono::Utc::now().timestamp();
+    let should_cleanup = {
+        let mut last_cleanup = state
+            .idempotency_cleanup
+            .lock()
+            .map_err(|_| FlowErr::Internal("idempotency cleanup lock poisoned".into()))?;
+        if last_cleanup.elapsed() >= StdDuration::from_secs(900) {
+            *last_cleanup = Instant::now();
+            true
+        } else {
+            false
+        }
+    };
+    if should_cleanup {
+        connection.cleanup_expired_idempotency(now).await?;
+    }
+    let expires_at = now
+        .checked_add(declaration.ttl)
+        .ok_or_else(|| FlowErr::Internal("IDEMPOTENCY TTL overflows timestamp range".into()))?;
+
+    loop {
+        if connection
+            .reserve_idempotency(&flow.name, &scope, &key, &request_hash, expires_at, now)
+            .await?
+        {
+            return Ok(IdempotencyStart::Acquired {
+                connection,
+                scope,
+                key,
+            });
+        }
+
+        let existing = connection
+            .read_idempotency(&flow.name, &scope, &key)
+            .await?
+            .ok_or_else(|| FlowErr::Internal("idempotency conflict row disappeared".into()))?;
+        if existing.expires_at <= now {
+            if connection
+                .delete_expired_idempotency(&flow.name, &scope, &key, now)
+                .await?
+            {
+                continue;
+            }
+            return Err(FlowErr::Internal(
+                "expired idempotency row could not be reclaimed".into(),
+            ));
+        }
+        if existing.request_hash != request_hash {
+            return Err(FlowErr::Http(
+                StatusCode::CONFLICT,
+                "idempotency key was already used with a different request".into(),
+            ));
+        }
+        if existing.state != "completed" {
+            return Err(FlowErr::Http(
+                StatusCode::CONFLICT,
+                "request with this idempotency key is still processing".into(),
+            ));
+        }
+
+        let status = existing.response_status.ok_or_else(|| {
+            FlowErr::Internal("completed idempotency record has no response status".into())
+        })?;
+        let body = existing
+            .response_body
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| FlowErr::Internal(format!("invalid stored idempotency response: {e}")))?
+            .unwrap_or(Value::Null);
+        let headers: HashMap<String, String> = existing
+            .response_headers
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(|e| FlowErr::Internal(format!("invalid stored idempotency headers: {e}")))?
+            .unwrap_or_default();
+        connection.commit().await?;
+        return Ok(IdempotencyStart::Replay(response_from_parts(
+            status, body, &headers, true,
+        )));
+    }
+}
 
 async fn run_flow(
     state: &AppState,
@@ -1217,6 +2437,8 @@ async fn run_flow(
         bindings: HashMap::new(),
         claims: Value::Null,
         tenant: None,
+        transaction: None,
+        pending_effects: Vec::new(),
     };
 
     // auth
@@ -1243,7 +2465,13 @@ async fn run_flow(
             .flat_map(|cd| cd.vary.iter())
             .map(|dp| format!("{:?}", resolve_dot(dp, &ctx)))
             .collect();
-        let key = format!("{}:{:?}:{:?}:{}", flow.name, ctx.path, ctx.query, vary_parts.join(","));
+        let key = format!(
+            "{}:{:?}:{:?}:{}",
+            flow.name,
+            ctx.path,
+            ctx.query,
+            vary_parts.join(",")
+        );
         if let Some(entry) = state.cache.lock().unwrap().get(&key) {
             if entry.expires > Instant::now() {
                 tracing::debug!(target: "axis::cache", flow = %flow.name, "cache hit");
@@ -1266,12 +2494,31 @@ async fn run_flow(
         }
     }
 
+    let mut idempotency_identity: Option<(String, String)> = None;
+    if let Some(declaration) = &flow.idempotency {
+        match begin_idempotent_flow(state, flow, declaration, &ctx).await {
+            Ok(IdempotencyStart::Acquired {
+                connection,
+                scope,
+                key,
+            }) => {
+                ctx.transaction = Some(connection);
+                idempotency_identity = Some((scope, key));
+            }
+            Ok(IdempotencyStart::Replay(response)) => return response,
+            Err(error) => return flow_err_resp(error),
+        }
+    }
+
     // execute steps (with optional timeout)
     let step_result = if let Some(timeout) = &flow.timeout {
         let dur = to_std_duration(timeout);
         match tokio::time::timeout(dur, exec_steps(state, &flow.steps, &mut ctx)).await {
             Ok(r) => r,
             Err(_) => {
+                if let Some(transaction) = ctx.transaction.take() {
+                    transaction.rollback().await;
+                }
                 return err_resp(StatusCode::GATEWAY_TIMEOUT, "timeout");
             }
         }
@@ -1281,25 +2528,87 @@ async fn run_flow(
 
     match step_result {
         Ok(()) => {}
-        Err(FlowErr::Http(code, msg)) => return err_resp(code, &msg),
+        Err(FlowErr::Http(code, msg)) => {
+            if let Some(transaction) = ctx.transaction.take() {
+                transaction.rollback().await;
+            }
+            return err_resp(code, &msg);
+        }
         Err(FlowErr::Internal(msg)) => {
+            if let Some(transaction) = ctx.transaction.take() {
+                transaction.rollback().await;
+            }
             eprintln!("flow {}: {msg}", flow.name);
             return err_resp(StatusCode::INTERNAL_SERVER_ERROR, &msg);
         }
     }
 
-    let resp = build_return_resp(&flow.return_stmt, &ctx);
+    let status = flow.return_stmt.code;
+    let response_body = return_body_value(&flow.return_stmt, &ctx);
+    let response_headers = return_headers_value(&flow.return_stmt, &ctx);
+
+    if let Some(mut transaction) = ctx.transaction.take() {
+        let (scope, key) = idempotency_identity
+            .as_ref()
+            .expect("idempotent transaction must have a scope and key");
+        let body_json = match serde_json::to_string(&response_body) {
+            Ok(body) => body,
+            Err(error) => {
+                transaction.rollback().await;
+                return err_resp(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("serialize idempotency response: {error}"),
+                );
+            }
+        };
+        let headers_json = match serde_json::to_string(&response_headers) {
+            Ok(headers) => headers,
+            Err(error) => {
+                transaction.rollback().await;
+                return err_resp(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("serialize idempotency headers: {error}"),
+                );
+            }
+        };
+        let completion = IdempotencyCompletion {
+            status,
+            body: body_json,
+            headers: headers_json,
+            completed_at: chrono::Utc::now().timestamp(),
+        };
+        if let Err(error) = transaction
+            .complete_idempotency(&flow.name, scope, key, &completion)
+            .await
+        {
+            transaction.rollback().await;
+            return flow_err_resp(error);
+        }
+        if let Err(error) = transaction.commit().await {
+            return flow_err_resp(error);
+        }
+        for event in ctx.pending_effects.drain(..) {
+            let _ = state.broadcast.send(event);
+        }
+    }
+
+    let mut resp = response_from_parts(status, response_body.clone(), &response_headers, false);
+    if flow.idempotency.is_some() {
+        resp.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotency-replayed"),
+            axum::http::HeaderValue::from_static("false"),
+        );
+    }
 
     // store in cache
     if let Some(key) = cache_key {
         if let Some(cd) = flow.cache.first() {
             let ttl = StdDuration::from_secs(cd.ttl as u64);
             // extract body from response for caching — build it again
-            let val = return_body_value(&flow.return_stmt, &ctx);
             state.cache.lock().unwrap().insert(
                 key,
                 CacheEntry {
-                    value: val,
+                    value: response_body,
                     expires: Instant::now() + ttl,
                 },
             );
@@ -1335,6 +2644,8 @@ async fn run_saga(
         bindings: HashMap::new(),
         claims: Value::Null,
         tenant: None,
+        transaction: None,
+        pending_effects: Vec::new(),
     };
 
     if let Some(auth) = &saga.auth {
@@ -1381,7 +2692,9 @@ async fn run_saga(
 
     // on_success effects
     for effect in &saga.on_success.effects {
-        exec_effect(state, effect, &ctx);
+        if let Err(error) = exec_effect(state, effect, &mut ctx).await {
+            return flow_err_resp(error);
+        }
     }
 
     build_return_resp(&saga.on_success.return_stmt, &ctx)
@@ -1454,6 +2767,8 @@ async fn handle_ws(
                                             bindings: HashMap::new(),
                                             claims: Value::Null,
                                             tenant: None,
+                                            transaction: None,
+                                            pending_effects: Vec::new(),
                                         };
                                         let _ = exec_steps(&state, &receiver.steps, &mut ctx).await;
                                     }
@@ -1531,8 +2846,10 @@ fn exec_step<'a>(
                 ctx.bindings.insert(s.name.clone(), val);
             }
             FlowStep::Insert(s) => exec_insert(state, s, &mut *ctx).await?,
+            FlowStep::Upsert(s) => exec_upsert(state, s, &mut *ctx).await?,
             FlowStep::Update(s) => exec_update(state, s, &mut *ctx).await?,
             FlowStep::Delete(s) => exec_delete(state, s, &mut *ctx).await?,
+            FlowStep::Fanout(s) => exec_fanout(state, s, &mut *ctx).await?,
             FlowStep::Rule(rule) => {
                 for req in &rule.requires {
                     let left = resolve_dot(&req.path, ctx);
@@ -1548,14 +2865,14 @@ fn exec_step<'a>(
             FlowStep::Guard(guard) => {
                 let val = eval_expr(state, &guard.expr, &mut *ctx).await?;
                 if !is_truthy(&val) {
-                    let status = StatusCode::from_u16(guard.code as u16)
-                        .unwrap_or(StatusCode::BAD_REQUEST);
+                    let status =
+                        StatusCode::from_u16(guard.code as u16).unwrap_or(StatusCode::BAD_REQUEST);
                     let msg = guard.message.as_deref().unwrap_or("guard failed");
                     return Err(FlowErr::Http(status, msg.into()));
                 }
             }
             FlowStep::Effect(effect) => {
-                exec_effect(state, effect, ctx);
+                exec_effect(state, effect, ctx).await?;
             }
             FlowStep::Match(m) => {
                 let mut matched = false;
@@ -1575,7 +2892,15 @@ fn exec_step<'a>(
             }
             FlowStep::Each(each) => {
                 let source_val = eval_expr(state, &each.source, &mut *ctx).await?;
-                if let Value::Array(items) = source_val {
+                let items = match source_val {
+                    Value::Array(items) => Some(items),
+                    Value::Object(mut object) => object
+                        .remove("items")
+                        .or_else(|| object.remove("data"))
+                        .and_then(|value| value.as_array().cloned()),
+                    _ => None,
+                };
+                if let Some(items) = items {
                     for item in items {
                         ctx.bindings.insert(each.binding.clone(), item);
                         exec_steps(state, &each.steps, &mut *ctx).await?;
@@ -1592,14 +2917,15 @@ fn exec_step<'a>(
             FlowStep::Upload(upload) => {
                 let file_val = eval_expr(state, &upload.file_expr, &mut *ctx).await?;
                 let url = exec_upload(state, &upload.storage, &file_val).await?;
-                ctx.bindings.insert(upload.binding.clone(), Value::String(url));
+                ctx.bindings
+                    .insert(upload.binding.clone(), Value::String(url));
             }
         }
         Ok(())
     })
 }
 
-fn exec_effect(state: &AppState, effect: &EffectStep, ctx: &Ctx) {
+async fn exec_effect(state: &AppState, effect: &EffectStep, ctx: &mut Ctx) -> Result<(), FlowErr> {
     let mut data = serde_json::Map::new();
     let kind = match &effect.kind {
         EffectKind::Email => "email",
@@ -1633,7 +2959,41 @@ fn exec_effect(state: &AppState, effect: &EffectStep, ctx: &Ctx) {
     }
     let event = Value::Object(data);
     info!("effect: {event}");
-    let _ = state.broadcast.send(event);
+
+    if let Some((_, db)) = state.dbs.iter().min_by_key(|(name, _)| *name) {
+        let dialect = ctx
+            .transaction
+            .as_ref()
+            .map(DbConnection::dialect)
+            .unwrap_or_else(|| db.dialect());
+        let placeholders: Vec<String> = (1..=9).map(|index| dialect.ph(index)).collect();
+        let payload = event.to_string();
+        let params = vec![
+            Value::String(uuid::Uuid::new_v4().to_string()),
+            event.get("kind").cloned().unwrap_or(Value::Null),
+            event.get("template").cloned().unwrap_or(Value::Null),
+            event.get("to").cloned().unwrap_or(Value::Null),
+            event.get("url").cloned().unwrap_or(Value::Null),
+            event.get("event").cloned().unwrap_or(Value::Null),
+            event.get("task").cloned().unwrap_or(Value::Null),
+            Value::String(payload),
+            Value::String("pending".into()),
+        ];
+        let sql = format!(
+            "INSERT INTO _axis_outbox \
+             (id, kind, template, recipient, url, event, task, payload, status) \
+             VALUES ({})",
+            placeholders.join(", ")
+        );
+        db_execute(ctx, db, &sql, &params).await?;
+    }
+
+    if ctx.transaction.is_some() {
+        ctx.pending_effects.push(event);
+    } else {
+        let _ = state.broadcast.send(event);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1692,10 +3052,21 @@ fn eval_expr<'a>(
                 args,
                 or_code,
                 or_message,
-            } => exec_service_call(state, service, method, args, *or_code, or_message.as_deref(), ctx).await,
-            Expr::WasmCall { .. } => {
-                Err(FlowErr::Internal("wasm calls not supported in interpreter".into()))
+            } => {
+                exec_service_call(
+                    state,
+                    service,
+                    method,
+                    args,
+                    *or_code,
+                    or_message.as_deref(),
+                    ctx,
+                )
+                .await
             }
+            Expr::WasmCall { .. } => Err(FlowErr::Internal(
+                "wasm calls not supported in interpreter".into(),
+            )),
             Expr::Aggregate { op, source, field } => {
                 let arr = eval_expr(state, source, &mut *ctx).await?;
                 if let Value::Array(items) = &arr {
@@ -1783,10 +3154,7 @@ fn eval_expr<'a>(
                     Ok(Value::Array(vec![]))
                 }
             }
-            Expr::FilterExpr {
-                source,
-                condition,
-            } => {
+            Expr::FilterExpr { source, condition } => {
                 let arr = eval_expr(state, source, &mut *ctx).await?;
                 if let Value::Array(items) = arr {
                     let mut filtered = Vec::new();
@@ -1849,7 +3217,9 @@ fn eval_expr<'a>(
                 Ok(Value::String(result))
             }
             Expr::Render { template, vars } => {
-                let tmpl = state.templates.get(template)
+                let tmpl = state
+                    .templates
+                    .get(template)
                     .ok_or_else(|| FlowErr::Internal(format!("template not found: {template}")))?;
                 let mut rendered = tmpl.clone();
                 for (key, val_expr) in vars {
@@ -1859,11 +3229,15 @@ fn eval_expr<'a>(
                 Ok(Value::String(rendered))
             }
             Expr::Translate { key, vars } => {
-                let locale = ctx.bindings.get("_locale")
+                let locale = ctx
+                    .bindings
+                    .get("_locale")
                     .and_then(|v| v.as_str())
                     .unwrap_or(&state.default_locale)
                     .to_string();
-                let translations = state.locales.get(&locale)
+                let translations = state
+                    .locales
+                    .get(&locale)
                     .or_else(|| state.locales.get(&state.default_locale));
                 let raw = translations
                     .and_then(|t| {
@@ -1919,13 +3293,12 @@ fn eval_expr<'a>(
 fn lit_json(lit: &LiteralValue) -> Value {
     match lit {
         LiteralValue::Int(n) => Value::Number((*n).into()),
-        LiteralValue::Decimal(s) => {
-            s.parse::<f64>()
-                .ok()
-                .and_then(serde_json::Number::from_f64)
-                .map(Value::Number)
-                .unwrap_or_else(|| Value::String(s.clone()))
-        }
+        LiteralValue::Decimal(s) => s
+            .parse::<f64>()
+            .ok()
+            .and_then(serde_json::Number::from_f64)
+            .map(Value::Number)
+            .unwrap_or_else(|| Value::String(s.clone())),
         LiteralValue::String(s) => Value::String(s.clone()),
         LiteralValue::Bool(b) => Value::Bool(*b),
         LiteralValue::Ident(s) => Value::String(s.clone()),
@@ -1979,6 +3352,15 @@ fn resolve_dot(dp: &DotPath, ctx: &Ctx) -> Value {
                 };
             }
             v.clone()
+        }
+        "header" if segs.len() == 2 => {
+            let canonical = segs[1].replace('_', "-");
+            ctx.headers
+                .get(&canonical)
+                .or_else(|| ctx.headers.get(&segs[1]))
+                .and_then(|value| value.to_str().ok())
+                .map(|value| Value::String(value.to_string()))
+                .unwrap_or(Value::Null)
         }
         other => {
             let mut v = ctx.bindings.get(other).cloned().unwrap_or_else(|| {
@@ -2061,9 +3443,10 @@ fn val_arith(l: &Value, r: &Value, f: impl Fn(f64, f64) -> f64) -> Value {
 
 fn val_cmp(l: &Value, r: &Value) -> Option<std::cmp::Ordering> {
     match (l, r) {
-        (Value::Number(a), Value::Number(b)) => {
-            a.as_f64().unwrap_or(0.0).partial_cmp(&b.as_f64().unwrap_or(0.0))
-        }
+        (Value::Number(a), Value::Number(b)) => a
+            .as_f64()
+            .unwrap_or(0.0)
+            .partial_cmp(&b.as_f64().unwrap_or(0.0)),
         (Value::String(a), Value::String(b)) => Some(a.cmp(b)),
         (Value::Bool(a), Value::Bool(b)) => Some(a.cmp(b)),
         _ => {
@@ -2173,12 +3556,8 @@ fn eval_binary(op: &BinaryOp, l: &Value, r: &Value) -> Value {
             val_cmp(l, r),
             Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
         )),
-        BinaryOp::Concat => {
-            Value::String(format!("{}{}", val_to_string(l), val_to_string(r)))
-        }
-        BinaryOp::StartsWith => {
-            Value::Bool(val_to_string(l).starts_with(&val_to_string(r)))
-        }
+        BinaryOp::Concat => Value::String(format!("{}{}", val_to_string(l), val_to_string(r))),
+        BinaryOp::StartsWith => Value::Bool(val_to_string(l).starts_with(&val_to_string(r))),
         BinaryOp::EndsWith => Value::Bool(val_to_string(l).ends_with(&val_to_string(r))),
         BinaryOp::Contains => match l {
             Value::Array(arr) => Value::Bool(arr.contains(r)),
@@ -2338,17 +3717,24 @@ async fn exec_service_call(
     or_message: Option<&str>,
     ctx: &mut Ctx,
 ) -> Result<Value, FlowErr> {
-    let svc_idx = state.services.get(service_name).ok_or_else(|| {
-        FlowErr::Internal(format!("service not found: {service_name}"))
-    })?;
+    let svc_idx = state
+        .services
+        .get(service_name)
+        .ok_or_else(|| FlowErr::Internal(format!("service not found: {service_name}")))?;
     let svc = match &state.program.constructs[*svc_idx] {
         Construct::Service(s) => s,
         _ => return Err(FlowErr::Internal("service index mismatch".into())),
     };
 
-    let svc_method = svc.methods.iter().find(|m| m.name == method_name).ok_or_else(|| {
-        FlowErr::Internal(format!("method {method_name} not found on service {service_name}"))
-    })?;
+    let svc_method = svc
+        .methods
+        .iter()
+        .find(|m| m.name == method_name)
+        .ok_or_else(|| {
+            FlowErr::Internal(format!(
+                "method {method_name} not found on service {service_name}"
+            ))
+        })?;
 
     let mut body = serde_json::Map::new();
     for (name, expr) in args {
@@ -2358,13 +3744,13 @@ async fn exec_service_call(
     let endpoint = resolve_service_endpoint(&svc.endpoint);
 
     if let Some(adapter_name) = endpoint.strip_prefix("adapter://") {
-        return exec_adapter_call(state, adapter_name, method_name, &body, or_code, or_message).await;
+        return exec_adapter_call(state, adapter_name, method_name, &body, or_code, or_message)
+            .await;
     }
 
     let url = format!("{endpoint}/{method_name}");
 
-    let mut req = state.http_client.post(&url)
-        .json(&Value::Object(body));
+    let mut req = state.http_client.post(&url).json(&Value::Object(body));
 
     if !svc.vault_key.is_empty() {
         if let Ok(key) = std::env::var(&svc.vault_key) {
@@ -2376,14 +3762,20 @@ async fn exec_service_call(
         req = req.timeout(to_std_duration(timeout));
     }
 
-    let max_attempts = svc_method.retry.as_ref().map(|r| r.count as u32 + 1).unwrap_or(1);
+    let max_attempts = svc_method
+        .retry
+        .as_ref()
+        .map(|r| r.count as u32 + 1)
+        .unwrap_or(1);
 
     let mut last_err = String::new();
     for attempt in 0..max_attempts {
         if attempt > 0 {
             let delay = match &svc_method.retry {
                 Some(r) => match r.strategy {
-                    RetryStrategy::Exponential => StdDuration::from_millis(100 * 2u64.pow(attempt - 1)),
+                    RetryStrategy::Exponential => {
+                        StdDuration::from_millis(100 * 2u64.pow(attempt - 1))
+                    }
                     RetryStrategy::Linear => StdDuration::from_millis(200 * attempt as u64),
                     RetryStrategy::None => StdDuration::from_millis(100),
                 },
@@ -2395,7 +3787,9 @@ async fn exec_service_call(
         match req.try_clone().unwrap().send().await {
             Ok(resp) => {
                 if resp.status().is_success() {
-                    return resp.json::<Value>().await
+                    return resp
+                        .json::<Value>()
+                        .await
                         .map_err(|e| FlowErr::Internal(format!("service response parse: {e}")));
                 }
                 last_err = format!("service returned {}", resp.status());
@@ -2421,12 +3815,14 @@ async fn exec_adapter_call(
     or_message: Option<&str>,
 ) -> Result<Value, FlowErr> {
     let registry = state.adapters.read().await;
-    let adapter = registry.get(adapter_name).ok_or_else(|| {
-        FlowErr::Internal(format!("adapter not found: {adapter_name}"))
-    })?;
+    let adapter = registry
+        .get(adapter_name)
+        .ok_or_else(|| FlowErr::Internal(format!("adapter not found: {adapter_name}")))?;
 
     let ep = adapter.endpoints.get(method_name).ok_or_else(|| {
-        FlowErr::Internal(format!("adapter {adapter_name} has no method {method_name}"))
+        FlowErr::Internal(format!(
+            "adapter {adapter_name} has no method {method_name}"
+        ))
     })?;
 
     if ep.url == "local" {
@@ -2455,7 +3851,8 @@ async fn exec_adapter_call(
         url = url.replace(&format!("${{{k}}}"), &val_to_string(v));
     }
 
-    let req = state.http_client
+    let req = state
+        .http_client
         .request(
             match ep.method.as_str() {
                 "GET" => reqwest::Method::GET,
@@ -2467,16 +3864,18 @@ async fn exec_adapter_call(
         )
         .json(&Value::Object(body.clone()));
 
-    let result = if let Some(secret) = adapter.config.get("secret_key")
+    let result = if let Some(secret) = adapter
+        .config
+        .get("secret_key")
         .or_else(|| adapter.config.get("auth_token"))
         .or_else(|| adapter.config.get("server_key"))
     {
         let req = req.bearer_auth(secret);
         match req.send().await {
-            Ok(resp) if resp.status().is_success() => {
-                resp.json::<Value>().await
-                    .map_err(|e| FlowErr::Internal(format!("adapter response parse: {e}")))
-            }
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<Value>()
+                .await
+                .map_err(|e| FlowErr::Internal(format!("adapter response parse: {e}"))),
             Ok(resp) => {
                 let err = format!("adapter returned {}", resp.status());
                 service_or_err(or_code, or_message, &err)
@@ -2488,10 +3887,10 @@ async fn exec_adapter_call(
         }
     } else {
         match req.send().await {
-            Ok(resp) if resp.status().is_success() => {
-                resp.json::<Value>().await
-                    .map_err(|e| FlowErr::Internal(format!("adapter response parse: {e}")))
-            }
+            Ok(resp) if resp.status().is_success() => resp
+                .json::<Value>()
+                .await
+                .map_err(|e| FlowErr::Internal(format!("adapter response parse: {e}"))),
             Ok(resp) => {
                 let err = format!("adapter returned {}", resp.status());
                 service_or_err(or_code, or_message, &err)
@@ -2504,7 +3903,8 @@ async fn exec_adapter_call(
     }?;
 
     if is_request_transform(&result) {
-        return exec_request_transform(&state.http_client, &result).await
+        return exec_request_transform(&state.http_client, &result)
+            .await
             .map_err(|e| match e {
                 FlowErr::Http(code, msg) => FlowErr::Http(code, msg),
                 FlowErr::Internal(msg) => {
@@ -2520,7 +3920,11 @@ async fn exec_adapter_call(
     Ok(result)
 }
 
-fn service_or_err(or_code: i64, or_message: Option<&str>, last_err: &str) -> Result<Value, FlowErr> {
+fn service_or_err(
+    or_code: i64,
+    or_message: Option<&str>,
+    last_err: &str,
+) -> Result<Value, FlowErr> {
     if or_code > 0 {
         Err(FlowErr::Http(
             StatusCode::from_u16(or_code as u16).unwrap_or(StatusCode::BAD_GATEWAY),
@@ -2539,13 +3943,14 @@ async fn exec_request_transform(
     client: &reqwest::Client,
     envelope: &Value,
 ) -> Result<Value, FlowErr> {
-    let req = envelope.get("_request").ok_or_else(|| {
-        FlowErr::Internal("_request field missing from envelope".into())
-    })?;
+    let req = envelope
+        .get("_request")
+        .ok_or_else(|| FlowErr::Internal("_request field missing from envelope".into()))?;
 
-    let url = req.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
-        FlowErr::Internal("_request.url is required".into())
-    })?;
+    let url = req
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| FlowErr::Internal("_request.url is required".into()))?;
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("POST");
 
     let mut http_req = match method.to_uppercase().as_str() {
@@ -2572,19 +3977,23 @@ async fn exec_request_transform(
         }
     }
 
-    let resp = http_req.send().await.map_err(|e| {
-        FlowErr::Internal(format!("_request HTTP call failed: {e}"))
-    })?;
+    let resp = http_req
+        .send()
+        .await
+        .map_err(|e| FlowErr::Internal(format!("_request HTTP call failed: {e}")))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(FlowErr::Internal(format!("_request returned {status}: {body}")));
+        return Err(FlowErr::Internal(format!(
+            "_request returned {status}: {body}"
+        )));
     }
 
-    let resp_json: Value = resp.json().await.map_err(|e| {
-        FlowErr::Internal(format!("_request response parse failed: {e}"))
-    })?;
+    let resp_json: Value = resp
+        .json()
+        .await
+        .map_err(|e| FlowErr::Internal(format!("_request response parse failed: {e}")))?;
 
     if let Some(transform) = envelope.get("_transform").and_then(|v| v.as_object()) {
         let mut result = serde_json::Map::new();
@@ -2621,19 +4030,36 @@ fn resolve_service_endpoint(endpoint: &str) -> String {
     }
 }
 
-async fn adapter_watcher(dir: std::path::PathBuf, registry: Arc<tokio::sync::RwLock<AdapterRegistry>>) {
+async fn adapter_watcher(
+    dir: std::path::PathBuf,
+    registry: Arc<tokio::sync::RwLock<AdapterRegistry>>,
+) {
     let mut last_scan: HashMap<String, std::time::SystemTime> = HashMap::new();
     loop {
         tokio::time::sleep(StdDuration::from_secs(2)).await;
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() { continue; }
+            if !path.is_dir() {
+                continue;
+            }
             let manifest = path.join("adapter.json");
-            if !manifest.exists() { continue; }
-            let Ok(meta) = manifest.metadata() else { continue };
-            let Ok(modified) = meta.modified() else { continue };
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !manifest.exists() {
+                continue;
+            }
+            let Ok(meta) = manifest.metadata() else {
+                continue;
+            };
+            let Ok(modified) = meta.modified() else {
+                continue;
+            };
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if last_scan.get(&name).map(|&t| modified > t).unwrap_or(true) {
                 last_scan.insert(name, modified);
                 let mut reg = registry.write().await;
@@ -2679,11 +4105,14 @@ fn compare_op_to_adapter(op: &CompareOp) -> AdapterFilterOp {
 
 #[cfg(feature = "redis-port")]
 fn to_adapter_filters(filters: &[FilterClause], ctx: &Ctx) -> Vec<FilterParam> {
-    filters.iter().map(|f| FilterParam {
-        field: f.field.clone(),
-        op: convert_filter_op(&f.op),
-        value: resolve_val(&f.value, ctx),
-    }).collect()
+    filters
+        .iter()
+        .map(|f| FilterParam {
+            field: f.field.clone(),
+            op: convert_filter_op(&f.op),
+            value: resolve_val(&f.value, ctx),
+        })
+        .collect()
 }
 
 #[cfg(feature = "redis-port")]
@@ -2706,7 +4135,10 @@ async fn redis_fetch(
         Ok(None) if or_code == 0 => Ok(Value::Null),
         Ok(None) => {
             let status = StatusCode::from_u16(or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
-            Err(FlowErr::Http(status, or_message.unwrap_or("not found").into()))
+            Err(FlowErr::Http(
+                status,
+                or_message.unwrap_or("not found").into(),
+            ))
         }
         Err(e) => Err(FlowErr::Internal(format!("redis fetch: {e}"))),
     }
@@ -2732,7 +4164,9 @@ async fn redis_insert(
         fields: map,
     };
 
-    let result = adapter.insert(req).await
+    let result = adapter
+        .insert(req)
+        .await
         .map_err(|e| FlowErr::Internal(format!("redis insert: {e}")))?;
     if let Some(b) = binding {
         ctx.bindings.insert(b.clone(), result);
@@ -2748,25 +4182,33 @@ async fn redis_update(
     sets: &[SetClause],
     ctx: &Ctx,
 ) -> Result<(), FlowErr> {
-    let adapter_filters: Vec<FilterParam> = filters.iter().map(|w| FilterParam {
-        field: w.field.clone(),
-        op: compare_op_to_adapter(&w.op),
-        value: resolve_val(&w.value, ctx),
-    }).collect();
+    let adapter_filters: Vec<FilterParam> = filters
+        .iter()
+        .map(|w| FilterParam {
+            field: w.field.clone(),
+            op: compare_op_to_adapter(&w.op),
+            value: resolve_val(&w.value, ctx),
+        })
+        .collect();
 
-    let id = adapter_filters.iter().find_map(|f| {
-        if (f.field == "id" || f.field == "key") && matches!(f.op, AdapterFilterOp::Eq) {
-            f.value.as_str().map(|s| s.to_string())
-        } else {
-            None
-        }
-    }).ok_or_else(|| FlowErr::Internal("redis UPDATE requires id or key filter".into()))?;
+    let id = adapter_filters
+        .iter()
+        .find_map(|f| {
+            if (f.field == "id" || f.field == "key") && matches!(f.op, AdapterFilterOp::Eq) {
+                f.value.as_str().map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| FlowErr::Internal("redis UPDATE requires id or key filter".into()))?;
 
     let fetch_req = adapter_trait::FetchRequest {
         source: source.into(),
         filters: adapter_filters,
     };
-    let existing = adapter.fetch(fetch_req).await
+    let existing = adapter
+        .fetch(fetch_req)
+        .await
         .map_err(|e| FlowErr::Internal(format!("redis update fetch: {e}")))?
         .unwrap_or(Value::Object(serde_json::Map::new()));
 
@@ -2783,7 +4225,9 @@ async fn redis_update(
         source: source.into(),
         fields: map,
     };
-    adapter.insert(ins_req).await
+    adapter
+        .insert(ins_req)
+        .await
         .map_err(|e| FlowErr::Internal(format!("redis update: {e}")))?;
     Ok(())
 }
@@ -2797,11 +4241,14 @@ async fn redis_delete(
     or_message: Option<&str>,
     ctx: &Ctx,
 ) -> Result<(), FlowErr> {
-    let adapter_filters: Vec<FilterParam> = wheres.iter().map(|w| FilterParam {
-        field: w.field.clone(),
-        op: compare_op_to_adapter(&w.op),
-        value: resolve_val(&w.value, ctx),
-    }).collect();
+    let adapter_filters: Vec<FilterParam> = wheres
+        .iter()
+        .map(|w| FilterParam {
+            field: w.field.clone(),
+            op: compare_op_to_adapter(&w.op),
+            value: resolve_val(&w.value, ctx),
+        })
+        .collect();
     let req = adapter_trait::DeleteRequest {
         source: source.into(),
         filters: adapter_filters,
@@ -2811,7 +4258,10 @@ async fn redis_delete(
         Ok(n) if n > 0 => Ok(()),
         Ok(_) => {
             let status = StatusCode::from_u16(or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
-            Err(FlowErr::Http(status, or_message.unwrap_or("not found").into()))
+            Err(FlowErr::Http(
+                status,
+                or_message.unwrap_or("not found").into(),
+            ))
         }
         Err(e) => Err(FlowErr::Internal(format!("redis delete: {e}"))),
     }
@@ -2823,8 +4273,77 @@ async fn redis_delete(
 
 fn require_db<'a>(state: &'a AppState, source: &str) -> Result<&'a DbBackend, FlowErr> {
     state.dbs.get(source).ok_or_else(|| {
-        FlowErr::Internal(format!("no database configured for source '{}' (set DATABASE_URL or {}_DATABASE_URL)", source, source.to_uppercase()))
+        FlowErr::Internal(format!(
+            "no database configured for source '{}' (set DATABASE_URL or {}_DATABASE_URL)",
+            source,
+            source.to_uppercase()
+        ))
     })
+}
+
+async fn db_fetch_optional(
+    ctx: &mut Ctx,
+    db: &DbBackend,
+    sql: &str,
+    params: &[Value],
+) -> Result<Option<Value>, FlowErr> {
+    if let Some(transaction) = ctx.transaction.as_mut() {
+        transaction.fetch_optional(sql, params).await
+    } else {
+        db.fetch_optional(sql, params).await
+    }
+}
+
+async fn db_fetch_one(
+    ctx: &mut Ctx,
+    db: &DbBackend,
+    sql: &str,
+    params: &[Value],
+) -> Result<Value, FlowErr> {
+    if let Some(transaction) = ctx.transaction.as_mut() {
+        transaction.fetch_one(sql, params).await
+    } else {
+        db.fetch_one(sql, params).await
+    }
+}
+
+async fn db_fetch_all(
+    ctx: &mut Ctx,
+    db: &DbBackend,
+    sql: &str,
+    params: &[Value],
+) -> Result<Vec<Value>, FlowErr> {
+    if let Some(transaction) = ctx.transaction.as_mut() {
+        transaction.fetch_all(sql, params).await
+    } else {
+        db.fetch_all(sql, params).await
+    }
+}
+
+async fn db_count(
+    ctx: &mut Ctx,
+    db: &DbBackend,
+    sql: &str,
+    params: &[Value],
+) -> Result<i64, FlowErr> {
+    if let Some(transaction) = ctx.transaction.as_mut() {
+        transaction.count(sql, params).await
+    } else {
+        db.count(sql, params).await
+    }
+}
+
+async fn db_execute(
+    ctx: &mut Ctx,
+    db: &DbBackend,
+    sql: &str,
+    params: &[Value],
+) -> Result<u64, FlowErr> {
+    if let Some(transaction) = ctx.transaction.as_mut() {
+        transaction.execute(sql, params).await
+    } else {
+        db.execute(sql, params).await
+    }
 }
 
 async fn exec_fetch(
@@ -2833,7 +4352,7 @@ async fn exec_fetch(
     filters: &[FilterClause],
     or_code: i64,
     or_message: Option<&str>,
-    ctx: &Ctx,
+    ctx: &mut Ctx,
 ) -> Result<Value, FlowErr> {
     #[cfg(feature = "redis-port")]
     if let Some(adapter) = state.redis_sources.get(source) {
@@ -2854,7 +4373,12 @@ async fn exec_fetch(
     for f in filters {
         let val = resolve_val(&f.value, ctx);
         params.push(val);
-        clauses.push(format!("{} {} {}", f.field, filter_op_sql(&f.op), dialect.ph(params.len())));
+        clauses.push(format!(
+            "{} {} {}",
+            f.field,
+            filter_op_sql(&f.op),
+            dialect.ph(params.len())
+        ));
     }
 
     let where_part = if clauses.is_empty() {
@@ -2864,7 +4388,7 @@ async fn exec_fetch(
     };
     let sql = format!("SELECT * FROM {source} WHERE {where_part} LIMIT 1");
 
-    match db.fetch_optional(&sql, &params).await? {
+    match db_fetch_optional(ctx, db, &sql, &params).await? {
         Some(row) => Ok(row),
         None if or_code == 0 => Ok(Value::Null),
         None => {
@@ -2883,11 +4407,13 @@ async fn exec_query(
     filters: &[FilterClause],
     sorts: &[SortClause],
     page_size: Option<&Expr>,
-    ctx: &Ctx,
+    ctx: &mut Ctx,
 ) -> Result<Value, FlowErr> {
     #[cfg(feature = "redis-port")]
     if state.redis_sources.contains_key(source) {
-        return Err(FlowErr::Internal(format!("QUERY not supported for Redis source '{source}' — use FETCH with a key filter")));
+        return Err(FlowErr::Internal(format!(
+            "QUERY not supported for Redis source '{source}' — use FETCH with a key filter"
+        )));
     }
     let db = require_db(state, source)?;
     let dialect = db.dialect();
@@ -2907,7 +4433,12 @@ async fn exec_query(
             continue;
         }
         params.push(val);
-        clauses.push(format!("{} {} {}", f.field, filter_op_sql(&f.op), dialect.ph(params.len())));
+        clauses.push(format!(
+            "{} {} {}",
+            f.field,
+            filter_op_sql(&f.op),
+            dialect.ph(params.len())
+        ));
     }
 
     let where_part = if clauses.is_empty() {
@@ -2951,12 +4482,10 @@ async fn exec_query(
     let data_sql =
         format!("SELECT * FROM {source}{where_part}{sort_part} LIMIT {limit} OFFSET {offset}");
 
-    let total = db.count(&count_sql, &params).await?;
-    let items = db.fetch_all(&data_sql, &params).await?;
+    let total = db_count(ctx, db, &count_sql, &params).await?;
+    let items = db_fetch_all(ctx, db, &data_sql, &params).await?;
 
-    Ok(
-        serde_json::json!({ "items": items, "total": total, "page": page, "page_size": limit }),
-    )
+    Ok(serde_json::json!({ "items": items, "total": total, "page": page, "page_size": limit }))
 }
 
 async fn exec_insert(state: &AppState, ins: &InsertStep, ctx: &mut Ctx) -> Result<(), FlowErr> {
@@ -3006,27 +4535,211 @@ async fn exec_insert(state: &AppState, ins: &InsertStep, ctx: &mut Ctx) -> Resul
     );
 
     if dialect == Dialect::Mysql {
-        db.execute(&sql, &params).await?;
+        db_execute(ctx, db, &sql, &params).await?;
         if let Some(binding) = &ins.binding {
             if let Some(pk_col) = &pk_uuid {
                 let pk_val = params[0].clone();
                 let select = format!("SELECT * FROM {} WHERE {} = ? LIMIT 1", ins.source, pk_col);
-                let row = db.fetch_one(&select, &[pk_val]).await?;
+                let row = db_fetch_one(ctx, db, &select, &[pk_val]).await?;
                 ctx.bindings.insert(binding.clone(), row);
             } else {
                 let select = format!("SELECT * FROM {} ORDER BY ROWID DESC LIMIT 1", ins.source);
-                if let Some(row) = db.fetch_optional(&select, &[]).await? {
+                if let Some(row) = db_fetch_optional(ctx, db, &select, &[]).await? {
                     ctx.bindings.insert(binding.clone(), row);
                 }
             }
         }
     } else {
-        let row = db.fetch_one(&sql, &params).await?;
+        let row = db_fetch_one(ctx, db, &sql, &params).await?;
         if let Some(binding) = &ins.binding {
             ctx.bindings.insert(binding.clone(), row);
         }
     }
 
+    Ok(())
+}
+
+async fn exec_upsert(state: &AppState, upsert: &UpsertStep, ctx: &mut Ctx) -> Result<(), FlowErr> {
+    tracing::debug!(target: "axis::database", source = %upsert.source, op = "UPSERT", "executing");
+    let source = &upsert.source;
+    let db = require_db(state, source)?;
+    let dialect = db.dialect();
+    let mut cols: Vec<String> = Vec::new();
+    let mut params: Vec<Value> = Vec::new();
+
+    let pk_uuid = if dialect == Dialect::Mysql || dialect == Dialect::Sqlite {
+        find_auto_uuid_pk(&state.program, source)
+    } else {
+        None
+    };
+    if let Some(pk_col) = &pk_uuid {
+        if !upsert.keys.iter().any(|(field, _)| field == pk_col)
+            && !upsert.sets.iter().any(|set| set.field == *pk_col)
+        {
+            cols.push(pk_col.clone());
+            params.push(Value::String(uuid::Uuid::new_v4().to_string()));
+        }
+    }
+
+    for (field, expr) in &upsert.keys {
+        cols.push(field.clone());
+        params.push(resolve_val(expr, ctx));
+    }
+    for set in &upsert.sets {
+        if !cols.contains(&set.field) {
+            cols.push(set.field.clone());
+            params.push(resolve_val(&set.value, ctx));
+        }
+    }
+
+    let placeholders: Vec<String> = (1..=cols.len()).map(|n| dialect.ph(n)).collect();
+    let key_cols: Vec<String> = upsert.keys.iter().map(|(field, _)| field.clone()).collect();
+    let update_cols: Vec<String> = upsert
+        .sets
+        .iter()
+        .filter(|set| !key_cols.contains(&set.field))
+        .map(|set| set.field.clone())
+        .collect();
+    let auto_updated_at = auto_updated_at_field(&state.program, source).filter(|field| {
+        !key_cols.iter().any(|column| column == *field)
+            && !update_cols.iter().any(|column| column == *field)
+    });
+
+    let conflict = match dialect {
+        Dialect::Postgres | Dialect::Sqlite => {
+            let mut updates = update_cols
+                .iter()
+                .map(|field| format!("{field} = EXCLUDED.{field}"))
+                .collect::<Vec<_>>();
+            if let Some(field) = &auto_updated_at {
+                updates.push(format!("{field} = {}", dialect.now_expr()));
+            }
+            format!(
+                " ON CONFLICT ({}) DO UPDATE SET {}",
+                key_cols.join(", "),
+                updates.join(", ")
+            )
+        }
+        Dialect::Mysql => {
+            let mut updates = update_cols
+                .iter()
+                .map(|field| format!("{field} = VALUES({field})"))
+                .collect::<Vec<_>>();
+            if let Some(field) = &auto_updated_at {
+                updates.push(format!("{field} = {}", dialect.now_expr()));
+            }
+            format!(" ON DUPLICATE KEY UPDATE {}", updates.join(", "))
+        }
+    };
+    let returning = dialect.returning_star();
+    let sql = format!(
+        "INSERT INTO {source} ({}) VALUES ({}){conflict}{returning}",
+        cols.join(", "),
+        placeholders.join(", ")
+    );
+
+    if dialect == Dialect::Mysql {
+        db_execute(ctx, db, &sql, &params).await?;
+        if let Some(binding) = &upsert.binding {
+            let mut where_params = Vec::new();
+            let mut clauses = Vec::new();
+            for (index, (field, expr)) in upsert.keys.iter().enumerate() {
+                clauses.push(format!("{field} = ?"));
+                let _ = index;
+                where_params.push(resolve_val(expr, ctx));
+            }
+            let select = format!(
+                "SELECT * FROM {source} WHERE {} LIMIT 1",
+                clauses.join(" AND ")
+            );
+            let row = db_fetch_one(ctx, db, &select, &where_params).await?;
+            ctx.bindings.insert(binding.clone(), row);
+        }
+    } else {
+        let row = db_fetch_one(ctx, db, &sql, &params).await?;
+        if let Some(binding) = &upsert.binding {
+            ctx.bindings.insert(binding.clone(), row);
+        }
+    }
+    Ok(())
+}
+
+async fn exec_fanout(state: &AppState, fanout: &FanoutStep, ctx: &mut Ctx) -> Result<(), FlowErr> {
+    tracing::debug!(target: "axis::database", source = %fanout.insert.source, op = "FANOUT", "executing");
+    let collection = eval_expr(state, &fanout.source, ctx).await?;
+    let items = match collection {
+        Value::Array(items) => items,
+        Value::Object(mut object) => object
+            .remove("items")
+            .or_else(|| object.remove("data"))
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default(),
+        _ => return Err(FlowErr::Internal("FANOUT source is not a list".into())),
+    };
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    let source = &fanout.insert.source;
+    #[cfg(feature = "redis-port")]
+    if state.redis_sources.contains_key(source) {
+        return Err(FlowErr::Internal(
+            "FANOUT requires a transactional SQL source".into(),
+        ));
+    }
+    let db = require_db(state, source)?;
+    let dialect = db.dialect();
+    let pk_uuid = if dialect == Dialect::Mysql || dialect == Dialect::Sqlite {
+        find_auto_uuid_pk(&state.program, source)
+    } else {
+        None
+    };
+    let extra_pk = pk_uuid
+        .as_ref()
+        .is_some_and(|pk| !fanout.insert.fields.iter().any(|(field, _)| field == pk));
+    let field_count = fanout.insert.fields.len() + usize::from(extra_pk);
+    let max_parameters = match dialect {
+        Dialect::Postgres | Dialect::Mysql => 65_000usize,
+        Dialect::Sqlite => 32_000usize,
+    };
+    let max_rows = max_parameters / field_count.max(1);
+    if items.len() > max_rows {
+        return Err(FlowErr::Http(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "FANOUT has {} rows; maximum for this shape is {max_rows}",
+                items.len()
+            ),
+        ));
+    }
+
+    let mut cols: Vec<String> = Vec::new();
+    if extra_pk {
+        cols.push(pk_uuid.clone().unwrap());
+    }
+    cols.extend(fanout.insert.fields.iter().map(|(field, _)| field.clone()));
+    let mut params = Vec::with_capacity(items.len() * field_count);
+    let mut rows = Vec::with_capacity(items.len());
+    for item in items {
+        ctx.bindings.insert(fanout.binding.clone(), item);
+        let mut placeholders = Vec::with_capacity(field_count);
+        if extra_pk {
+            params.push(Value::String(uuid::Uuid::new_v4().to_string()));
+            placeholders.push(dialect.ph(params.len()));
+        }
+        for (_, expr) in &fanout.insert.fields {
+            params.push(resolve_val(expr, ctx));
+            placeholders.push(dialect.ph(params.len()));
+        }
+        rows.push(format!("({})", placeholders.join(", ")));
+    }
+    ctx.bindings.remove(&fanout.binding);
+    let sql = format!(
+        "INSERT INTO {source} ({}) VALUES {}",
+        cols.join(", "),
+        rows.join(", ")
+    );
+    db_execute(ctx, db, &sql, &params).await?;
     Ok(())
 }
 
@@ -3041,28 +4754,15 @@ async fn exec_update(state: &AppState, upd: &UpdateStep, ctx: &mut Ctx) -> Resul
     let dialect = db.dialect();
     let mut sets: Vec<String> = Vec::new();
     let mut params: Vec<Value> = Vec::new();
-    let now_fn = if dialect == Dialect::Sqlite { "datetime('now')" } else { "now()" };
-
-    for c in &state.program.constructs {
-        if let Construct::Source(src) = c {
-            if src.name == upd.source {
-                for sc in &state.program.constructs {
-                    if let Construct::Shape(shape) = sc {
-                        if shape.name == src.shape {
-                            for f in &shape.fields {
-                                let is_auto =
-                                    f.modifiers.iter().any(|m| matches!(m, Modifier::Auto));
-                                let is_pk =
-                                    f.modifiers.iter().any(|m| matches!(m, Modifier::Pk));
-                                if is_auto && matches!(f.ty, TypeExpr::Timestamp) && !is_pk {
-                                    sets.push(format!("{} = {now_fn}", f.name));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    if auto_updated_at_field(&state.program, &upd.source).is_some()
+        && !upd.sets.iter().any(|set| set.field == "updated_at")
+    {
+        let now_fn = if dialect == Dialect::Sqlite {
+            "datetime('now')"
+        } else {
+            "now()"
+        };
+        sets.push(format!("updated_at = {now_fn}"));
     }
 
     for s in &upd.sets {
@@ -3080,7 +4780,12 @@ async fn exec_update(state: &AppState, upd: &UpdateStep, ctx: &mut Ctx) -> Resul
         let val = resolve_val(&w.value, ctx);
         where_params.push(val);
         let n = params.len() + where_params.len();
-        wheres.push(format!("{} {} {}", w.field, compare_op_sql(&w.op), dialect.ph(n)));
+        wheres.push(format!(
+            "{} {} {}",
+            w.field,
+            compare_op_sql(&w.op),
+            dialect.ph(n)
+        ));
     }
     params.extend(where_params);
 
@@ -3093,10 +4798,9 @@ async fn exec_update(state: &AppState, upd: &UpdateStep, ctx: &mut Ctx) -> Resul
     );
 
     if dialect == Dialect::Mysql {
-        let affected = db.execute(&sql, &params).await?;
+        let affected = db_execute(ctx, db, &sql, &params).await?;
         if affected == 0 {
-            let status =
-                StatusCode::from_u16(upd.or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
+            let status = StatusCode::from_u16(upd.or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
             return Err(FlowErr::Http(
                 status,
                 upd.or_message.as_deref().unwrap_or("not found").into(),
@@ -3104,33 +4808,42 @@ async fn exec_update(state: &AppState, upd: &UpdateStep, ctx: &mut Ctx) -> Resul
         }
         match &upd.binding {
             Some(UpdateBinding::As(name)) => {
-                let where_sql: Vec<String> = upd.wheres.iter()
+                let where_sql: Vec<String> = upd
+                    .wheres
+                    .iter()
                     .map(|w| format!("{} {} ?", w.field, compare_op_sql(&w.op)))
                     .collect();
-                let select = format!("SELECT * FROM {} WHERE {} LIMIT 1", upd.source, where_sql.join(" AND "));
-                let where_vals: Vec<Value> = upd.wheres.iter().map(|w| resolve_val(&w.value, ctx)).collect();
-                if let Some(row) = db.fetch_optional(&select, &where_vals).await? {
+                let select = format!(
+                    "SELECT * FROM {} WHERE {} LIMIT 1",
+                    upd.source,
+                    where_sql.join(" AND ")
+                );
+                let where_vals: Vec<Value> = upd
+                    .wheres
+                    .iter()
+                    .map(|w| resolve_val(&w.value, ctx))
+                    .collect();
+                if let Some(row) = db_fetch_optional(ctx, db, &select, &where_vals).await? {
                     ctx.bindings.insert(name.clone(), row);
                 }
             }
             Some(UpdateBinding::Count(name)) => {
-                ctx.bindings.insert(name.clone(), Value::Number(affected.into()));
+                ctx.bindings
+                    .insert(name.clone(), Value::Number(affected.into()));
             }
             None => {}
         }
     } else {
-        match db.fetch_optional(&sql, &params).await? {
-            Some(row) => {
-                match &upd.binding {
-                    Some(UpdateBinding::As(name)) => {
-                        ctx.bindings.insert(name.clone(), row);
-                    }
-                    Some(UpdateBinding::Count(name)) => {
-                        ctx.bindings.insert(name.clone(), Value::Number(1.into()));
-                    }
-                    None => {}
+        match db_fetch_optional(ctx, db, &sql, &params).await? {
+            Some(row) => match &upd.binding {
+                Some(UpdateBinding::As(name)) => {
+                    ctx.bindings.insert(name.clone(), row);
                 }
-            }
+                Some(UpdateBinding::Count(name)) => {
+                    ctx.bindings.insert(name.clone(), Value::Number(1.into()));
+                }
+                None => {}
+            },
             None => {
                 let status =
                     StatusCode::from_u16(upd.or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
@@ -3144,12 +4857,48 @@ async fn exec_update(state: &AppState, upd: &UpdateStep, ctx: &mut Ctx) -> Resul
     Ok(())
 }
 
+fn auto_updated_at_field<'a>(program: &'a Program, source_name: &str) -> Option<&'a str> {
+    let shape_name = program
+        .constructs
+        .iter()
+        .find_map(|construct| match construct {
+            Construct::Source(source) if source.name == source_name => Some(source.shape.as_str()),
+            _ => None,
+        })?;
+    program
+        .constructs
+        .iter()
+        .find_map(|construct| match construct {
+            Construct::Shape(shape) if shape.name == shape_name => {
+                shape.fields.iter().find_map(|field| {
+                    let is_auto = field
+                        .modifiers
+                        .iter()
+                        .any(|modifier| matches!(modifier, Modifier::Auto));
+                    (field.name == "updated_at"
+                        && is_auto
+                        && matches!(field.ty, TypeExpr::Timestamp))
+                    .then_some(field.name.as_str())
+                })
+            }
+            _ => None,
+        })
+}
+
 async fn exec_delete(state: &AppState, del: &DeleteStep, ctx: &mut Ctx) -> Result<(), FlowErr> {
     tracing::debug!(target: "axis::database", source = %del.source, op = "DELETE", "executing");
     let source = &del.source;
     #[cfg(feature = "redis-port")]
     if let Some(adapter) = state.redis_sources.get(source.as_str()) {
-        return redis_delete(adapter, source, &del.wheres, del.or_code, del.or_message.as_deref(), ctx).await;
+        return redis_delete(
+            adapter,
+            source,
+            &del.wheres,
+            del.or_code,
+            del.or_message.as_deref(),
+            ctx,
+        )
+        .await;
     }
     let db = require_db(state, source)?;
     let dialect = db.dialect();
@@ -3159,20 +4908,28 @@ async fn exec_delete(state: &AppState, del: &DeleteStep, ctx: &mut Ctx) -> Resul
     for w in &del.wheres {
         let val = resolve_val(&w.value, ctx);
         params.push(val);
-        wheres.push(format!("{} {} {}", w.field, compare_op_sql(&w.op), dialect.ph(params.len())));
+        wheres.push(format!(
+            "{} {} {}",
+            w.field,
+            compare_op_sql(&w.op),
+            dialect.ph(params.len())
+        ));
     }
 
     let sql = if dialect == Dialect::Mysql {
         format!("DELETE FROM {} WHERE {}", del.source, wheres.join(" AND "))
     } else {
-        format!("DELETE FROM {} WHERE {} RETURNING 1", del.source, wheres.join(" AND "))
+        format!(
+            "DELETE FROM {} WHERE {} RETURNING 1",
+            del.source,
+            wheres.join(" AND ")
+        )
     };
 
     if dialect == Dialect::Mysql {
-        let affected = db.execute(&sql, &params).await?;
+        let affected = db_execute(ctx, db, &sql, &params).await?;
         if affected == 0 {
-            let status =
-                StatusCode::from_u16(del.or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
+            let status = StatusCode::from_u16(del.or_code as u16).unwrap_or(StatusCode::NOT_FOUND);
             return Err(FlowErr::Http(
                 status,
                 del.or_message.as_deref().unwrap_or("not found").into(),
@@ -3180,7 +4937,7 @@ async fn exec_delete(state: &AppState, del: &DeleteStep, ctx: &mut Ctx) -> Resul
         }
         Ok(())
     } else {
-        match db.fetch_optional(&sql, &params).await? {
+        match db_fetch_optional(ctx, db, &sql, &params).await? {
             Some(_) => Ok(()),
             None => {
                 let status =
@@ -3194,20 +4951,138 @@ async fn exec_delete(state: &AppState, del: &DeleteStep, ctx: &mut Ctx) -> Resul
     }
 }
 
-async fn exec_upload(state: &AppState, storage_name: &str, file_val: &Value) -> Result<String, FlowErr> {
-    let config = state.storages.get(storage_name).ok_or_else(|| {
-        FlowErr::Http(StatusCode::INTERNAL_SERVER_ERROR, format!("undefined storage: {storage_name}"))
-    })?;
+type UploadValueParts = (Vec<u8>, Option<String>, Option<String>);
 
-    let file_bytes = match file_val {
-        Value::String(s) => s.as_bytes().to_vec(),
-        _ => {
+fn upload_value_parts(file_val: &Value) -> Result<UploadValueParts, FlowErr> {
+    match file_val {
+        Value::String(value) => Ok((value.as_bytes().to_vec(), None, None)),
+        Value::Array(values) => {
+            let bytes = values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .and_then(|byte| u8::try_from(byte).ok())
+                        .ok_or_else(|| {
+                            FlowErr::Http(
+                                StatusCode::BAD_REQUEST,
+                                "upload byte arrays must contain integers from 0 to 255".into(),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((bytes, None, None))
+        }
+        Value::Object(object) => {
+            let encoded = object
+                .get("data_base64")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    FlowErr::Http(
+                        StatusCode::BAD_REQUEST,
+                        "upload objects require data_base64".into(),
+                    )
+                })?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| {
+                    FlowErr::Http(
+                        StatusCode::BAD_REQUEST,
+                        "upload contains invalid base64".into(),
+                    )
+                })?;
+            let filename = object
+                .get("filename")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let content_type = object
+                .get("content_type")
+                .and_then(Value::as_str)
+                .map(|value| value.to_ascii_lowercase());
+            Ok((bytes, filename, content_type))
+        }
+        _ => Err(FlowErr::Http(
+            StatusCode::BAD_REQUEST,
+            "upload: expected multipart file data, a byte array, or a string".into(),
+        )),
+    }
+}
+
+fn safe_upload_extension(
+    bytes: &[u8],
+    filename: Option<&str>,
+    content_type: Option<&str>,
+    allowed_types: &[String],
+) -> Result<String, FlowErr> {
+    let detected = infer::get(bytes);
+    let detected_mime = detected.map(|kind| kind.mime_type().to_ascii_lowercase());
+    let detected_extension = detected.map(|kind| kind.extension().to_ascii_lowercase());
+    let supplied_extension = filename
+        .and_then(|name| std::path::Path::new(name).extension())
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|extension| {
+            !extension.is_empty()
+                && extension.len() <= 16
+                && extension
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
+        });
+    let content_type = content_type.map(str::to_ascii_lowercase);
+
+    if !allowed_types.is_empty() {
+        let allowed = allowed_types.iter().any(|allowed| {
+            let allowed = allowed.trim_start_matches('.').to_ascii_lowercase();
+            detected_mime.as_deref() == Some(allowed.as_str())
+                || detected_extension.as_deref() == Some(allowed.as_str())
+                || (detected.is_none()
+                    && (content_type.as_deref() == Some(allowed.as_str())
+                        || supplied_extension.as_deref() == Some(allowed.as_str())))
+        });
+        if !allowed {
             return Err(FlowErr::Http(
-                StatusCode::BAD_REQUEST,
-                "upload: expected file data".into(),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "file type is not allowed by the storage policy".into(),
             ));
         }
-    };
+    }
+
+    Ok(detected_extension
+        .or(supplied_extension)
+        .unwrap_or_else(|| "bin".into()))
+}
+
+fn s3_public_url(storage_name: &str, bucket: &str, object_key: &str) -> String {
+    let storage_key = format!(
+        "AXIS_STORAGE_{}_PUBLIC_BASE_URL",
+        storage_name
+            .chars()
+            .map(|character| if character.is_ascii_alphanumeric() {
+                character.to_ascii_uppercase()
+            } else {
+                '_'
+            })
+            .collect::<String>()
+    );
+    let base = std::env::var(storage_key)
+        .or_else(|_| std::env::var("AXIS_S3_PUBLIC_BASE_URL"))
+        .unwrap_or_else(|_| format!("https://{bucket}.s3.amazonaws.com"));
+    format!("{}/{}", base.trim_end_matches('/'), object_key)
+}
+
+async fn exec_upload(
+    state: &AppState,
+    storage_name: &str,
+    file_val: &Value,
+) -> Result<String, FlowErr> {
+    let config = state.storages.get(storage_name).ok_or_else(|| {
+        FlowErr::Http(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("undefined storage: {storage_name}"),
+        )
+    })?;
+
+    let (file_bytes, original_filename, content_type) = upload_value_parts(file_val)?;
 
     if let Some(max) = config.max_size {
         if file_bytes.len() as i64 > max {
@@ -3219,7 +5094,12 @@ async fn exec_upload(state: &AppState, storage_name: &str, file_val: &Value) -> 
     }
 
     let file_id = uuid::Uuid::new_v4().to_string();
-    let ext = if !config.types.is_empty() { &config.types[0] } else { "bin" };
+    let ext = safe_upload_extension(
+        &file_bytes,
+        original_filename.as_deref(),
+        content_type.as_deref(),
+        &config.types,
+    )?;
     let filename = format!("{file_id}.{ext}");
 
     let rel_path = match &config.prefix {
@@ -3229,28 +5109,46 @@ async fn exec_upload(state: &AppState, storage_name: &str, file_val: &Value) -> 
 
     match config.backend {
         StorageBackend::Local => {
-            let dir = std::path::Path::new(&config.bucket).join(
-                config.prefix.as_deref().unwrap_or(""),
-            );
+            let dir =
+                std::path::Path::new(&config.bucket).join(config.prefix.as_deref().unwrap_or(""));
             tokio::fs::create_dir_all(&dir).await.map_err(|e| {
-                FlowErr::Http(StatusCode::INTERNAL_SERVER_ERROR, format!("storage mkdir: {e}"))
+                FlowErr::Http(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("storage mkdir: {e}"),
+                )
             })?;
             let full_path = dir.join(&filename);
-            tokio::fs::write(&full_path, &file_bytes).await.map_err(|e| {
-                FlowErr::Http(StatusCode::INTERNAL_SERVER_ERROR, format!("storage write: {e}"))
-            })?;
+            tokio::fs::write(&full_path, &file_bytes)
+                .await
+                .map_err(|e| {
+                    FlowErr::Http(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("storage write: {e}"),
+                    )
+                })?;
             tracing::info!(target: "axis::files", storage = storage_name, path = %full_path.display(), "file uploaded");
             if config.access == StorageAccess::Public {
-                Ok(format!("/files/{}", rel_path))
+                Ok(format!("/files/{storage_name}/{rel_path}"))
             } else {
                 Ok(rel_path)
             }
         }
         StorageBackend::S3 => {
-            Err(FlowErr::Http(
-                StatusCode::NOT_IMPLEMENTED,
-                "S3 storage backend not yet implemented".into(),
-            ))
+            let store = config.s3.as_ref().ok_or_else(|| {
+                FlowErr::Internal(format!("S3 client is missing for storage {storage_name}"))
+            })?;
+            let object_path = ObjectPath::parse(&rel_path)
+                .map_err(|error| FlowErr::Internal(format!("invalid S3 object path: {error}")))?;
+            store
+                .put_opts(&object_path, file_bytes.into(), PutOptions::default())
+                .await
+                .map_err(|error| FlowErr::Internal(format!("S3 upload failed: {error}")))?;
+            tracing::info!(target: "axis::files", storage = storage_name, object = %rel_path, "file uploaded");
+            if config.access == StorageAccess::Public {
+                Ok(s3_public_url(storage_name, &config.bucket, &rel_path))
+            } else {
+                Ok(format!("s3://{}/{}", config.bucket, rel_path))
+            }
         }
     }
 }
@@ -3301,9 +5199,13 @@ fn pg_bind<'q>(
             }
         }
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3317,13 +5219,20 @@ fn pg_bind_scalar<'q, T>(
 ) -> sqlx::query::QueryScalar<'q, sqlx::Postgres, T, sqlx::postgres::PgArguments> {
     match v {
         Value::String(s) => {
-            if let Ok(u) = uuid::Uuid::parse_str(s) { q.bind(u) }
-            else { q.bind(s.clone()) }
+            if let Ok(u) = uuid::Uuid::parse_str(s) {
+                q.bind(u)
+            } else {
+                q.bind(s.clone())
+            }
         }
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3336,22 +5245,41 @@ fn pg_row_json(row: &PgRow) -> Value {
     for col in row.columns() {
         let name = col.name();
         let val = match col.type_info().name() {
-            "UUID" => row.try_get::<uuid::Uuid, _>(name)
-                .map(|u| Value::String(u.to_string())).unwrap_or(Value::Null),
-            "TEXT" | "VARCHAR" | "CHAR" | "NAME" | "BPCHAR" => row.try_get::<String, _>(name)
-                .map(Value::String).unwrap_or(Value::Null),
-            "BOOL" | "BOOLEAN" => row.try_get::<bool, _>(name)
-                .map(Value::Bool).unwrap_or(Value::Null),
-            "INT2" | "INT4" | "INT8" => row.try_get::<i64, _>(name)
-                .map(|n| Value::Number(n.into())).unwrap_or(Value::Null),
-            "FLOAT4" | "FLOAT8" => row.try_get::<f64, _>(name).ok()
-                .and_then(serde_json::Number::from_f64).map(Value::Number).unwrap_or(Value::Null),
-            "TIMESTAMPTZ" | "TIMESTAMP" => row.try_get::<chrono::DateTime<chrono::Utc>, _>(name)
-                .map(|t| Value::String(t.to_rfc3339())).unwrap_or(Value::Null),
-            "DATE" => row.try_get::<chrono::NaiveDate, _>(name)
-                .map(|d| Value::String(d.to_string())).unwrap_or(Value::Null),
+            "UUID" => row
+                .try_get::<uuid::Uuid, _>(name)
+                .map(|u| Value::String(u.to_string()))
+                .unwrap_or(Value::Null),
+            "TEXT" | "VARCHAR" | "CHAR" | "NAME" | "BPCHAR" => row
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+            "BOOL" | "BOOLEAN" => row
+                .try_get::<bool, _>(name)
+                .map(Value::Bool)
+                .unwrap_or(Value::Null),
+            "INT2" | "INT4" | "INT8" => row
+                .try_get::<i64, _>(name)
+                .map(|n| Value::Number(n.into()))
+                .unwrap_or(Value::Null),
+            "FLOAT4" | "FLOAT8" => row
+                .try_get::<f64, _>(name)
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
+            "TIMESTAMPTZ" | "TIMESTAMP" => row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>(name)
+                .map(|t| Value::String(t.to_rfc3339()))
+                .unwrap_or(Value::Null),
+            "DATE" => row
+                .try_get::<chrono::NaiveDate, _>(name)
+                .map(|d| Value::String(d.to_string()))
+                .unwrap_or(Value::Null),
             "JSONB" | "JSON" => row.try_get::<Value, _>(name).unwrap_or(Value::Null),
-            _ => row.try_get::<String, _>(name).map(Value::String).unwrap_or(Value::Null),
+            _ => row
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
         };
         map.insert(name.to_string(), val);
     }
@@ -3367,9 +5295,13 @@ fn my_bind<'q>(
     match v {
         Value::String(s) => q.bind(s.clone()),
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3384,9 +5316,13 @@ fn my_bind_scalar<'q, T>(
     match v {
         Value::String(s) => q.bind(s.clone()),
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3400,19 +5336,36 @@ fn my_row_json(row: &MySqlRow) -> Value {
         let name = col.name();
         let val = match col.type_info().name() {
             "CHAR" | "VARCHAR" | "TEXT" | "TINYTEXT" | "MEDIUMTEXT" | "LONGTEXT" | "ENUM" => row
-                .try_get::<String, _>(name).map(Value::String).unwrap_or(Value::Null),
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
             "BOOLEAN" | "TINYINT(1)" | "BIT" => row
-                .try_get::<bool, _>(name).map(Value::Bool).unwrap_or(Value::Null),
+                .try_get::<bool, _>(name)
+                .map(Value::Bool)
+                .unwrap_or(Value::Null),
             "TINYINT" | "SMALLINT" | "INT" | "MEDIUMINT" | "BIGINT" => row
-                .try_get::<i64, _>(name).map(|n| Value::Number(n.into())).unwrap_or(Value::Null),
-            "FLOAT" | "DOUBLE" | "DECIMAL" => row.try_get::<f64, _>(name).ok()
-                .and_then(serde_json::Number::from_f64).map(Value::Number).unwrap_or(Value::Null),
-            "DATETIME" | "TIMESTAMP" => row.try_get::<chrono::NaiveDateTime, _>(name)
-                .map(|t| Value::String(t.to_string())).unwrap_or(Value::Null),
-            "DATE" => row.try_get::<chrono::NaiveDate, _>(name)
-                .map(|d| Value::String(d.to_string())).unwrap_or(Value::Null),
+                .try_get::<i64, _>(name)
+                .map(|n| Value::Number(n.into()))
+                .unwrap_or(Value::Null),
+            "FLOAT" | "DOUBLE" | "DECIMAL" => row
+                .try_get::<f64, _>(name)
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
+            "DATETIME" | "TIMESTAMP" => row
+                .try_get::<chrono::NaiveDateTime, _>(name)
+                .map(|t| Value::String(t.to_string()))
+                .unwrap_or(Value::Null),
+            "DATE" => row
+                .try_get::<chrono::NaiveDate, _>(name)
+                .map(|d| Value::String(d.to_string()))
+                .unwrap_or(Value::Null),
             "JSON" => row.try_get::<Value, _>(name).unwrap_or(Value::Null),
-            _ => row.try_get::<String, _>(name).map(Value::String).unwrap_or(Value::Null),
+            _ => row
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
         };
         map.insert(name.to_string(), val);
     }
@@ -3428,9 +5381,13 @@ fn sl_bind<'q>(
     match v {
         Value::String(s) => q.bind(s.clone()),
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3445,9 +5402,13 @@ fn sl_bind_scalar<'q, T>(
     match v {
         Value::String(s) => q.bind(s.clone()),
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() { q.bind(i) }
-            else if let Some(f) = n.as_f64() { q.bind(f) }
-            else { q.bind(n.to_string()) }
+            if let Some(i) = n.as_i64() {
+                q.bind(i)
+            } else if let Some(f) = n.as_f64() {
+                q.bind(f)
+            } else {
+                q.bind(n.to_string())
+            }
         }
         Value::Bool(b) => q.bind(*b),
         Value::Null => q.bind(Option::<String>::None),
@@ -3460,13 +5421,28 @@ fn sl_row_json(row: &SqliteRow) -> Value {
     for col in row.columns() {
         let name = col.name();
         let val = match col.type_info().name() {
-            "TEXT" => row.try_get::<String, _>(name).map(Value::String).unwrap_or(Value::Null),
-            "INTEGER" | "INT" | "BIGINT" => row.try_get::<i64, _>(name)
-                .map(|n| Value::Number(n.into())).unwrap_or(Value::Null),
-            "REAL" | "FLOAT" | "DOUBLE" => row.try_get::<f64, _>(name).ok()
-                .and_then(serde_json::Number::from_f64).map(Value::Number).unwrap_or(Value::Null),
-            "BOOLEAN" => row.try_get::<bool, _>(name).map(Value::Bool).unwrap_or(Value::Null),
-            _ => row.try_get::<String, _>(name).map(Value::String).unwrap_or(Value::Null),
+            "TEXT" => row
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+            "INTEGER" | "INT" | "BIGINT" => row
+                .try_get::<i64, _>(name)
+                .map(|n| Value::Number(n.into()))
+                .unwrap_or(Value::Null),
+            "REAL" | "FLOAT" | "DOUBLE" => row
+                .try_get::<f64, _>(name)
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
+            "BOOLEAN" => row
+                .try_get::<bool, _>(name)
+                .map(Value::Bool)
+                .unwrap_or(Value::Null),
+            _ => row
+                .try_get::<String, _>(name)
+                .map(Value::String)
+                .unwrap_or(Value::Null),
         };
         map.insert(name.to_string(), val);
     }
@@ -3482,7 +5458,8 @@ fn find_auto_uuid_pk(program: &Program, source_name: &str) -> Option<String> {
                         if shape.name == src.shape {
                             for f in &shape.fields {
                                 let is_pk = f.modifiers.iter().any(|m| matches!(m, Modifier::Pk));
-                                let is_auto = f.modifiers.iter().any(|m| matches!(m, Modifier::Auto));
+                                let is_auto =
+                                    f.modifiers.iter().any(|m| matches!(m, Modifier::Auto));
                                 if is_pk && is_auto && matches!(f.ty, TypeExpr::Uuid) {
                                     return Some(f.name.clone());
                                 }
@@ -3502,9 +5479,7 @@ fn find_auto_uuid_pk(program: &Program, source_name: &str) -> Option<String> {
 
 fn return_body_value(ret: &ReturnStmt, ctx: &Ctx) -> Value {
     match &ret.body {
-        Some(ReturnBody::Binding(name)) => {
-            ctx.bindings.get(name).cloned().unwrap_or(Value::Null)
-        }
+        Some(ReturnBody::Binding(name)) => ctx.bindings.get(name).cloned().unwrap_or(Value::Null),
         Some(ReturnBody::Paginated { .. }) => {
             ctx.bindings.values().next().cloned().unwrap_or(Value::Null)
         }
@@ -3532,14 +5507,64 @@ fn resolve_return_value(rv: &ReturnValue, ctx: &Ctx) -> Value {
     }
 }
 
-fn build_return_resp(ret: &ReturnStmt, ctx: &Ctx) -> Response {
-    let status = StatusCode::from_u16(ret.code as u16).unwrap_or(StatusCode::OK);
-    let val = return_body_value(ret, ctx);
-    if val.is_null() {
+fn value_as_header(value: Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Null | Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn return_headers_value(ret: &ReturnStmt, ctx: &Ctx) -> HashMap<String, String> {
+    ret.headers
+        .iter()
+        .filter_map(|(name, expression)| {
+            value_as_header(resolve_val(expression, ctx)).map(|value| (name.clone(), value))
+        })
+        .collect()
+}
+
+fn response_from_parts(
+    status: i64,
+    body: Value,
+    headers: &HashMap<String, String>,
+    replayed: bool,
+) -> Response {
+    let status = u16::try_from(status)
+        .ok()
+        .and_then(|status| StatusCode::from_u16(status).ok())
+        .unwrap_or(StatusCode::OK);
+    let mut response = if body.is_null() {
         status.into_response()
     } else {
-        (status, axum::Json(val)).into_response()
+        (status, axum::Json(body)).into_response()
+    };
+    for (name, value) in headers {
+        let Ok(name) = axum::http::HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = axum::http::HeaderValue::from_str(value) else {
+            continue;
+        };
+        response.headers_mut().insert(name, value);
     }
+    if replayed {
+        response.headers_mut().insert(
+            axum::http::HeaderName::from_static("idempotency-replayed"),
+            axum::http::HeaderValue::from_static("true"),
+        );
+    }
+    response
+}
+
+fn build_return_resp(ret: &ReturnStmt, ctx: &Ctx) -> Response {
+    response_from_parts(
+        ret.code,
+        return_body_value(ret, ctx),
+        &return_headers_value(ret, ctx),
+        false,
+    )
 }
 
 fn err_resp(status: StatusCode, msg: &str) -> Response {
@@ -3560,14 +5585,39 @@ fn flow_err_resp(e: FlowErr) -> Response {
 // auto schema creation
 // ---------------------------------------------------------------------------
 
-async fn auto_create_tables(program: &Program, dbs: &HashMap<String, DbBackend>) -> Result<(), Box<dyn std::error::Error>> {
+async fn auto_create_tables(
+    program: &Program,
+    dbs: &HashMap<String, DbBackend>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    fn steps_have_effects(steps: &[FlowStep]) -> bool {
+        steps.iter().any(|step| match step {
+            FlowStep::Effect(_) => true,
+            FlowStep::Match(step) => {
+                step.branches
+                    .iter()
+                    .any(|branch| steps_have_effects(&branch.steps))
+                    || step
+                        .default
+                        .as_ref()
+                        .is_some_and(|steps| steps_have_effects(steps))
+            }
+            FlowStep::Each(step) => steps_have_effects(&step.steps),
+            FlowStep::Try(step) => {
+                steps_have_effects(&step.body) || steps_have_effects(&step.recover)
+            }
+            _ => false,
+        })
+    }
+
     let mut shapes: HashMap<String, &ShapeDef> = HashMap::new();
     let mut sources: Vec<&SourceDef> = Vec::new();
     let mut shape_to_source: HashMap<String, String> = HashMap::new();
 
     for c in &program.constructs {
         match c {
-            Construct::Shape(s) => { shapes.insert(s.name.clone(), s); }
+            Construct::Shape(s) => {
+                shapes.insert(s.name.clone(), s);
+            }
             Construct::Source(s) => {
                 shape_to_source.insert(s.shape.clone(), s.name.clone());
                 sources.push(s);
@@ -3595,20 +5645,38 @@ async fn auto_create_tables(program: &Program, dbs: &HashMap<String, DbBackend>)
             write!(create, "  {} {}", field.name, col_type).unwrap();
 
             let is_pk = field.modifiers.iter().any(|m| matches!(m, Modifier::Pk));
-            let is_required = field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
-            let is_unique = field.modifiers.iter().any(|m| matches!(m, Modifier::Unique));
+            let is_required = field
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Required));
+            let is_unique = field
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Unique));
             let is_auto = field.modifiers.iter().any(|m| matches!(m, Modifier::Auto));
 
-            if is_pk { write!(create, " PRIMARY KEY").unwrap(); }
-            if is_required && !is_pk { write!(create, " NOT NULL").unwrap(); }
-            if is_unique { write!(create, " UNIQUE").unwrap(); }
+            if is_pk {
+                write!(create, " PRIMARY KEY").unwrap();
+            }
+            if is_required && !is_pk {
+                write!(create, " NOT NULL").unwrap();
+            }
+            if is_unique {
+                write!(create, " UNIQUE").unwrap();
+            }
 
             if is_auto {
                 match (&field.ty, dialect) {
-                    (TypeExpr::Uuid, Dialect::Postgres) => write!(create, " DEFAULT gen_random_uuid()").unwrap(),
-                    (TypeExpr::Uuid, Dialect::Mysql) => write!(create, " DEFAULT (UUID())").unwrap(),
+                    (TypeExpr::Uuid, Dialect::Postgres) => {
+                        write!(create, " DEFAULT gen_random_uuid()").unwrap()
+                    }
+                    (TypeExpr::Uuid, Dialect::Mysql) => {
+                        write!(create, " DEFAULT (UUID())").unwrap()
+                    }
                     (TypeExpr::Uuid, Dialect::Sqlite) => {}
-                    (TypeExpr::Timestamp, Dialect::Sqlite) => write!(create, " DEFAULT (datetime('now'))").unwrap(),
+                    (TypeExpr::Timestamp, Dialect::Sqlite) => {
+                        write!(create, " DEFAULT (datetime('now'))").unwrap()
+                    }
                     (TypeExpr::Timestamp, _) => write!(create, " DEFAULT now()").unwrap(),
                     _ => {}
                 }
@@ -3621,11 +5689,22 @@ async fn auto_create_tables(program: &Program, dbs: &HashMap<String, DbBackend>)
             }
 
             if dialect != Dialect::Sqlite {
-                if let TypeExpr::Ref { shape: ref_shape, field: ref_field } = &field.ty {
-                    let table = shape_to_source.get(ref_shape)
+                if let TypeExpr::Ref {
+                    shape: ref_shape,
+                    field: ref_field,
+                } = &field.ty
+                {
+                    let table = shape_to_source
+                        .get(ref_shape)
                         .map(|s| s.as_str())
                         .unwrap_or(ref_shape.as_str());
-                    write!(create, " REFERENCES {}({})", table.to_lowercase(), ref_field).unwrap();
+                    write!(
+                        create,
+                        " REFERENCES {}({})",
+                        table.to_lowercase(),
+                        ref_field
+                    )
+                    .unwrap();
                 }
             }
 
@@ -3637,9 +5716,9 @@ async fn auto_create_tables(program: &Program, dbs: &HashMap<String, DbBackend>)
         }
         create.push(')');
 
-        if let Err(e) = db.execute_ddl(&create).await {
-            eprintln!("create table {}: {e}", source.name);
-        }
+        db.execute_ddl(&create)
+            .await
+            .map_err(|error| format!("create table '{}': {error}", source.name))?;
 
         for field in &shape.fields {
             let col_type = schema_sql_type(&field.ty, dialect);
@@ -3649,7 +5728,113 @@ async fn auto_create_tables(program: &Program, dbs: &HashMap<String, DbBackend>)
             );
             let _ = db.execute_ddl(&alter).await;
         }
+        for index in &source.indexes {
+            let fields: Vec<String> = index
+                .fields
+                .iter()
+                .map(|field| field.name.clone())
+                .collect();
+            let unique = index
+                .fields
+                .iter()
+                .any(|field| matches!(field.suffix, Some(IndexSuffix::Unique)));
+            let index_name = format!("idx_{}_{}", source.name, fields.join("_"));
+            db.ensure_index(&source.name, &index_name, &fields, unique)
+                .await
+                .map_err(|error| format!("create index '{index_name}': {error}"))?;
+        }
         table_count += 1;
+    }
+
+    let has_idempotency = program
+        .constructs
+        .iter()
+        .any(|construct| matches!(construct, Construct::Flow(flow) if flow.idempotency.is_some()));
+    if has_idempotency {
+        for db in dbs.values() {
+            let index_column = if db.dialect() == Dialect::Mysql {
+                "  INDEX idx_axis_idempotency_expires_at (expires_at),\n"
+            } else {
+                ""
+            };
+            let table = format!(
+                "CREATE TABLE IF NOT EXISTS _axis_idempotency (
+  flow_name VARCHAR(200) NOT NULL,
+  scope_key VARCHAR(512) NOT NULL,
+  idempotency_key VARCHAR(255) NOT NULL,
+  request_hash CHAR(64) NOT NULL,
+  state VARCHAR(16) NOT NULL CHECK (state IN ('processing', 'completed')),
+  response_status BIGINT,
+  response_body TEXT,
+  response_headers TEXT,
+  expires_at BIGINT NOT NULL,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+{index_column}\
+  PRIMARY KEY (flow_name, scope_key, idempotency_key)
+)"
+            );
+            db.execute_ddl(&table)
+                .await
+                .map_err(|error| format!("create _axis_idempotency: {error}"))?;
+            if db.dialect() != Dialect::Mysql {
+                db.execute_ddl("CREATE INDEX IF NOT EXISTS idx_axis_idempotency_expires_at ON _axis_idempotency (expires_at)")
+                    .await
+                    .map_err(|error| format!("index _axis_idempotency: {error}"))?;
+            }
+        }
+    }
+
+    let has_effects = program.constructs.iter().any(|construct| match construct {
+        Construct::Flow(flow) => steps_have_effects(&flow.steps),
+        Construct::Saga(saga) => {
+            saga.steps
+                .iter()
+                .any(|step| steps_have_effects(&step.flow_steps))
+                || !saga.on_success.effects.is_empty()
+        }
+        _ => false,
+    });
+    if has_effects {
+        for db in dbs.values() {
+            let (uuid_type, timestamp_type, now_default, index_column) = match db.dialect() {
+                Dialect::Postgres => ("UUID", "TIMESTAMPTZ", "now()", ""),
+                Dialect::Mysql => (
+                    "CHAR(36)",
+                    "DATETIME",
+                    "NOW()",
+                    "  INDEX idx_axis_outbox_status (status),\n",
+                ),
+                Dialect::Sqlite => ("TEXT", "TEXT", "datetime('now')", ""),
+            };
+            let table = format!(
+                "CREATE TABLE IF NOT EXISTS _axis_outbox (
+  id {uuid_type} PRIMARY KEY,
+  kind VARCHAR(50) NOT NULL,
+  template VARCHAR(200),
+  recipient TEXT,
+  url TEXT,
+  event VARCHAR(200),
+  task VARCHAR(200),
+  payload TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  created_at {timestamp_type} NOT NULL DEFAULT ({now_default}),
+  processed_at {timestamp_type},
+{index_column}\
+  CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+)"
+            );
+            db.execute_ddl(&table)
+                .await
+                .map_err(|error| format!("create _axis_outbox: {error}"))?;
+            if db.dialect() != Dialect::Mysql {
+                db.execute_ddl(
+                    "CREATE INDEX IF NOT EXISTS idx_axis_outbox_status ON _axis_outbox (status)",
+                )
+                .await
+                .map_err(|error| format!("index _axis_outbox: {error}"))?;
+            }
+        }
     }
 
     if table_count > 0 {
@@ -3674,7 +5859,13 @@ fn schema_sql_type(ty: &TypeExpr, dialect: Dialect) -> String {
         (TypeExpr::Timestamp, Dialect::Sqlite) => "TEXT".into(),
         (TypeExpr::Date, Dialect::Sqlite) => "TEXT".into(),
         (TypeExpr::Date, _) => "DATE".into(),
-        (TypeExpr::Decimal { precision: _, scale: _ }, Dialect::Sqlite) => "REAL".into(),
+        (
+            TypeExpr::Decimal {
+                precision: _,
+                scale: _,
+            },
+            Dialect::Sqlite,
+        ) => "REAL".into(),
         (TypeExpr::Decimal { precision, scale }, _) => {
             let p = precision.unwrap_or(10);
             let s = scale.unwrap_or(2);
@@ -3684,9 +5875,14 @@ fn schema_sql_type(ty: &TypeExpr, dialect: Dialect) -> String {
         (TypeExpr::Json, Dialect::Mysql) => "JSON".into(),
         (TypeExpr::Json, Dialect::Sqlite) => "TEXT".into(),
         (TypeExpr::Enum(variants), _) => {
-            format!("VARCHAR({})", variants.iter().map(|v| v.len()).max().unwrap_or(50))
+            format!(
+                "VARCHAR({})",
+                variants.iter().map(|v| v.len()).max().unwrap_or(50)
+            )
         }
-        (TypeExpr::List(inner), Dialect::Postgres) => format!("{}[]", schema_sql_type(inner, dialect)),
+        (TypeExpr::List(inner), Dialect::Postgres) => {
+            format!("{}[]", schema_sql_type(inner, dialect))
+        }
         (TypeExpr::List(_), _) => "JSON".into(),
         (TypeExpr::Maybe(inner), _) => schema_sql_type(inner, dialect),
         (TypeExpr::Map(_, _), Dialect::Postgres) => "JSONB".into(),
@@ -3704,13 +5900,19 @@ fn schema_sql_literal(val: &LiteralValue, dialect: Dialect) -> String {
         LiteralValue::Decimal(s) => s.clone(),
         LiteralValue::String(s) => format!("'{}'", s.replace('\'', "''")),
         LiteralValue::Bool(b) => {
-            if dialect == Dialect::Sqlite { if *b { "1" } else { "0" }.into() }
-            else { b.to_string() }
+            if dialect == Dialect::Sqlite {
+                if *b { "1" } else { "0" }.into()
+            } else {
+                b.to_string()
+            }
         }
         LiteralValue::Ident(s) => s.clone(),
         LiteralValue::Now => {
-            if dialect == Dialect::Sqlite { "datetime('now')".into() }
-            else { "now()".into() }
+            if dialect == Dialect::Sqlite {
+                "datetime('now')".into()
+            } else {
+                "now()".into()
+            }
         }
         LiteralValue::None => "NULL".into(),
     }
@@ -3723,19 +5925,26 @@ fn load_templates(tmpl_dir: &Path) -> HashMap<String, String> {
     }
     load_templates_recursive(tmpl_dir, tmpl_dir, &mut templates);
     if !templates.is_empty() {
-        info!("loaded {} templates from {}", templates.len(), tmpl_dir.display());
+        info!(
+            "loaded {} templates from {}",
+            templates.len(),
+            tmpl_dir.display()
+        );
     }
     templates
 }
 
 fn load_templates_recursive(base: &Path, dir: &Path, templates: &mut HashMap<String, String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             load_templates_recursive(base, &path, templates);
         } else if let Ok(content) = std::fs::read_to_string(&path) {
-            let key = path.strip_prefix(base)
+            let key = path
+                .strip_prefix(base)
                 .unwrap_or(&path)
                 .to_string_lossy()
                 .to_string();
@@ -3757,7 +5966,8 @@ fn load_locales(locale_dir: &Path) -> (HashMap<String, Value>, String) {
         if path.extension().is_some_and(|e| e == "json") {
             if let Ok(data) = std::fs::read_to_string(&path) {
                 if let Ok(json) = serde_json::from_str::<Value>(&data) {
-                    let name = path.file_stem()
+                    let name = path
+                        .file_stem()
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
@@ -3771,4 +5981,45 @@ fn load_locales(locale_dir: &Path) -> (HashMap<String, Value>, String) {
         info!("loaded {} locales (default: {})", locales.len(), default);
     }
     (locales, default)
+}
+
+#[cfg(test)]
+mod update_timestamp_tests {
+    use super::*;
+    use crate::project::compile_source;
+
+    #[test]
+    fn updates_only_the_auto_updated_at_field() {
+        let with_both = compile_source(
+            r#"
+SHAPE Record
+  id UUID PK
+  created_at TIMESTAMP AUTO
+  updated_at TIMESTAMP AUTO
+
+SOURCE records SQLITE
+  SHAPE Record
+  INDEX id
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            auto_updated_at_field(&with_both, "records"),
+            Some("updated_at")
+        );
+
+        let created_only = compile_source(
+            r#"
+SHAPE Record
+  id UUID PK
+  created_at TIMESTAMP AUTO
+
+SOURCE records SQLITE
+  SHAPE Record
+  INDEX id
+"#,
+        )
+        .unwrap();
+        assert_eq!(auto_updated_at_field(&created_only, "records"), None);
+    }
 }

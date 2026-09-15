@@ -453,6 +453,7 @@ impl Parser {
             body: None,
             params: Vec::new(),
             headers: Vec::new(),
+            idempotency: None,
             steps: Vec::new(),
             return_stmt: ReturnStmt {
                 code: 200,
@@ -496,6 +497,12 @@ impl Parser {
                 TokenKind::Header => {
                     flow.headers.push(self.parse_header_decl()?);
                 }
+                TokenKind::Idempotency => {
+                    if flow.idempotency.is_some() {
+                        return Err(self.error("FLOW may declare IDEMPOTENCY only once"));
+                    }
+                    flow.idempotency = Some(self.parse_idempotency_decl()?);
+                }
                 TokenKind::Rule => {
                     flow.steps.push(FlowStep::Rule(self.parse_rule_step()?));
                 }
@@ -508,11 +515,17 @@ impl Parser {
                 TokenKind::Insert => {
                     flow.steps.push(FlowStep::Insert(self.parse_insert_step()?));
                 }
+                TokenKind::Upsert => {
+                    flow.steps.push(FlowStep::Upsert(self.parse_upsert_step()?));
+                }
                 TokenKind::Update => {
                     flow.steps.push(FlowStep::Update(self.parse_update_step()?));
                 }
                 TokenKind::Delete => {
                     flow.steps.push(FlowStep::Delete(self.parse_delete_step()?));
+                }
+                TokenKind::Fanout => {
+                    flow.steps.push(FlowStep::Fanout(self.parse_fanout_step()?));
                 }
                 TokenKind::Effect => {
                     flow.steps.push(FlowStep::Effect(self.parse_effect_step()?));
@@ -539,10 +552,9 @@ impl Parser {
                     self.advance();
                 }
                 _ => {
-                    return Err(self.error(format!(
-                        "unexpected token in FLOW: {}",
-                        self.peek_kind()
-                    )));
+                    return Err(
+                        self.error(format!("unexpected token in FLOW: {}", self.peek_kind()))
+                    );
                 }
             }
         }
@@ -703,6 +715,22 @@ impl Parser {
         })
     }
 
+    fn parse_idempotency_decl(&mut self) -> AxisResult<IdempotencyDecl> {
+        let span = self.expect(TokenKind::Idempotency)?;
+        let key = self.parse_dot_path()?;
+        self.expect(TokenKind::Scope)?;
+        let scope = self.parse_dot_path()?;
+        self.expect(TokenKind::Ttl)?;
+        let ttl = self.expect_int()?;
+        self.expect_newline()?;
+        Ok(IdempotencyDecl {
+            key,
+            scope,
+            ttl,
+            span,
+        })
+    }
+
     fn parse_rule_step(&mut self) -> AxisResult<RuleStep> {
         let span = self.expect(TokenKind::Rule)?;
         let name = self.expect_ident()?;
@@ -789,6 +817,75 @@ impl Parser {
             source,
             fields,
             binding,
+            span,
+        })
+    }
+
+    fn parse_upsert_step(&mut self) -> AxisResult<UpsertStep> {
+        let span = self.expect(TokenKind::Upsert)?;
+        let source = self.expect_ident()?;
+        self.expect_newline()?;
+        self.expect_indent()?;
+
+        let mut keys = Vec::new();
+        let mut sets = Vec::new();
+        while !self.check_dedent() && !self.is_at_end() {
+            match self.peek_kind() {
+                TokenKind::Key => {
+                    self.advance();
+                    let field = self.expect_ident()?;
+                    let value = self.parse_inline_expr()?;
+                    self.expect_newline()?;
+                    keys.push((field, value));
+                }
+                TokenKind::Set => {
+                    self.advance();
+                    let field = self.expect_ident()?;
+                    let value = self.parse_inline_expr()?;
+                    self.expect_newline()?;
+                    sets.push(SetClause { field, value });
+                }
+                _ => {
+                    return Err(self.error(format!(
+                        "expected KEY or SET in UPSERT, got {}",
+                        self.peek_kind()
+                    )));
+                }
+            }
+        }
+        self.expect_dedent()?;
+
+        let binding = if matches!(self.peek_kind(), TokenKind::As) {
+            self.advance();
+            let name = self.expect_ident()?;
+            self.expect_newline()?;
+            Some(name)
+        } else {
+            None
+        };
+
+        Ok(UpsertStep {
+            source,
+            keys,
+            sets,
+            binding,
+            span,
+        })
+    }
+
+    fn parse_fanout_step(&mut self) -> AxisResult<FanoutStep> {
+        let span = self.expect(TokenKind::Fanout)?;
+        let binding = self.expect_ident()?;
+        self.expect(TokenKind::In)?;
+        let source = self.parse_inline_expr()?;
+        self.expect_newline()?;
+        self.expect_indent()?;
+        let insert = self.parse_insert_step()?;
+        self.expect_dedent()?;
+        Ok(FanoutStep {
+            binding,
+            source,
+            insert,
             span,
         })
     }
@@ -1001,7 +1098,11 @@ impl Parser {
         }
         self.expect_dedent()?;
 
-        Ok(MatchStep { branches, default, span })
+        Ok(MatchStep {
+            branches,
+            default,
+            span,
+        })
     }
 
     fn parse_return_stmt(&mut self) -> AxisResult<ReturnStmt> {
@@ -1053,7 +1154,9 @@ impl Parser {
             });
         }
 
-        Err(self.error(format!("expected binding name or newline after RETURN {code}")))
+        Err(self.error(format!(
+            "expected binding name or newline after RETURN {code}"
+        )))
     }
 
     fn parse_paginated_return(&mut self, code: i64, span: Span) -> AxisResult<ReturnStmt> {
@@ -1122,7 +1225,9 @@ impl Parser {
                         let seg = name.clone();
                         fields.push(ReturnField {
                             name,
-                            value: ReturnValue::Expr(Expr::DotPath(DotPath { segments: vec![seg] })),
+                            value: ReturnValue::Expr(Expr::DotPath(DotPath {
+                                segments: vec![seg],
+                            })),
                         });
                     }
                 } else {
@@ -1150,8 +1255,12 @@ impl Parser {
 
     fn parse_inline_expr(&mut self) -> AxisResult<Expr> {
         match self.peek_kind() {
-            TokenKind::IntLit(_) | TokenKind::DecimalLit(_) | TokenKind::StringLit(_)
-            | TokenKind::True_ | TokenKind::False_ | TokenKind::None_ => {
+            TokenKind::IntLit(_)
+            | TokenKind::DecimalLit(_)
+            | TokenKind::StringLit(_)
+            | TokenKind::True_
+            | TokenKind::False_
+            | TokenKind::None_ => {
                 let lit = self.parse_literal_value()?;
                 Ok(Expr::Literal(lit))
             }
@@ -1191,7 +1300,10 @@ impl Parser {
                 self.expect_indent()?;
                 let inner = self.parse_block_expr()?;
                 self.expect_dedent()?;
-                Ok(Expr::Cached { ttl, expr: Box::new(inner) })
+                Ok(Expr::Cached {
+                    ttl,
+                    expr: Box::new(inner),
+                })
             }
             TokenKind::Fetch => self.parse_fetch_expr(),
             TokenKind::Query => self.parse_query_expr(),
@@ -1200,32 +1312,41 @@ impl Parser {
                 self.parse_binary_arith_expr()
             }
             TokenKind::And | TokenKind::Or => self.parse_binary_bool_expr(),
-            TokenKind::Eq | TokenKind::Neq | TokenKind::Gt | TokenKind::Gte
-            | TokenKind::Lt | TokenKind::Lte => self.parse_binary_compare_expr(),
+            TokenKind::Eq
+            | TokenKind::Neq
+            | TokenKind::Gt
+            | TokenKind::Gte
+            | TokenKind::Lt
+            | TokenKind::Lte => self.parse_binary_compare_expr(),
             TokenKind::Not | TokenKind::Empty | TokenKind::Exists => self.parse_unary_expr(),
-            TokenKind::Count | TokenKind::Sum | TokenKind::Avg | TokenKind::Min | TokenKind::Max
-            | TokenKind::First | TokenKind::Last => {
-                self.parse_aggregate_expr()
-            }
+            TokenKind::Count
+            | TokenKind::Sum
+            | TokenKind::Avg
+            | TokenKind::Min
+            | TokenKind::Max
+            | TokenKind::First
+            | TokenKind::Last => self.parse_aggregate_expr(),
             TokenKind::If => self.parse_if_expr(),
-            TokenKind::DaysBetween | TokenKind::HoursBetween | TokenKind::MinutesBetween
-            | TokenKind::FormatDate => {
-                self.parse_time_between_expr()
-            }
+            TokenKind::DaysBetween
+            | TokenKind::HoursBetween
+            | TokenKind::MinutesBetween
+            | TokenKind::FormatDate => self.parse_time_between_expr(),
             TokenKind::NowMinus | TokenKind::NowPlus => self.parse_now_offset_expr(),
-            TokenKind::Concat | TokenKind::Lower | TokenKind::Upper | TokenKind::Trim
-            | TokenKind::Length | TokenKind::Substring
-            | TokenKind::StartsWith | TokenKind::EndsWith | TokenKind::Contains => {
-                self.parse_string_expr()
-            }
+            TokenKind::Concat
+            | TokenKind::Lower
+            | TokenKind::Upper
+            | TokenKind::Trim
+            | TokenKind::Length
+            | TokenKind::Substring
+            | TokenKind::StartsWith
+            | TokenKind::EndsWith
+            | TokenKind::Contains => self.parse_string_expr(),
             TokenKind::ToInt | TokenKind::ToDecimal | TokenKind::ToString_ => {
                 self.parse_conversion_expr()
             }
             TokenKind::Coalesce => self.parse_coalesce_expr(),
             TokenKind::Round => self.parse_round_expr(),
-            TokenKind::Ceil | TokenKind::Floor | TokenKind::Abs => {
-                self.parse_math_unary_expr()
-            }
+            TokenKind::Ceil | TokenKind::Floor | TokenKind::Abs => self.parse_math_unary_expr(),
             TokenKind::Select => self.parse_map_expr(),
             TokenKind::Filter => self.parse_filter_expr(),
             TokenKind::Reduce => self.parse_reduce_expr(),
@@ -1447,7 +1568,12 @@ impl Parser {
             TokenKind::Like => FilterOp::Like,
             TokenKind::StartsWith => FilterOp::StartsWith,
             TokenKind::Contains => FilterOp::Contains,
-            _ => return Err(self.error(format!("expected filter operator, got {}", self.peek_kind()))),
+            _ => {
+                return Err(self.error(format!(
+                    "expected filter operator, got {}",
+                    self.peek_kind()
+                )));
+            }
         };
         self.advance();
         Ok(op)
@@ -1462,7 +1588,12 @@ impl Parser {
             TokenKind::Lt => CompareOp::Lt,
             TokenKind::Lte => CompareOp::Lte,
             TokenKind::In => CompareOp::In,
-            _ => return Err(self.error(format!("expected comparison operator, got {}", self.peek_kind()))),
+            _ => {
+                return Err(self.error(format!(
+                    "expected comparison operator, got {}",
+                    self.peek_kind()
+                )));
+            }
         };
         self.advance();
         Ok(op)
@@ -1851,13 +1982,37 @@ impl Parser {
 
         let mut filters = Vec::new();
         let mut requires = Vec::new();
+        let mut mode = PolicyMatchMode::All;
 
         while !self.check_dedent() && !self.is_at_end() {
             match self.peek_kind() {
                 TokenKind::AppliesTo => {
                     self.advance();
                     self.expect(TokenKind::Flow)?;
-                    if matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof) {
+                    if matches!(self.peek_kind(), TokenKind::Any)
+                        || matches!(self.peek_kind(), TokenKind::Ident(ref s) if s == "all")
+                    {
+                        mode = if matches!(self.peek_kind(), TokenKind::Any) {
+                            self.advance();
+                            PolicyMatchMode::Any
+                        } else {
+                            self.advance();
+                            PolicyMatchMode::All
+                        };
+                        self.expect_newline()?;
+                        self.expect_indent()?;
+                        while !self.check_dedent() && !self.is_at_end() {
+                            let filter = if matches!(self.peek_kind(), TokenKind::Not) {
+                                self.advance();
+                                PolicyFilter::Not(Box::new(self.parse_policy_filter()?))
+                            } else {
+                                self.parse_policy_filter()?
+                            };
+                            filters.push(filter);
+                            self.expect_newline()?;
+                        }
+                        self.expect_dedent()?;
+                    } else if matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof) {
                         self.expect_newline()?;
                     } else {
                         self.expect(TokenKind::Where)?;
@@ -1881,7 +2036,7 @@ impl Parser {
 
         Ok(PolicyDef {
             name,
-            applies_to: AppliesTo { filters },
+            applies_to: AppliesTo { filters, mode },
             requires,
             span,
         })
@@ -1914,7 +2069,10 @@ impl Parser {
                 let path = self.expect_string()?;
                 Ok(PolicyFilter::PathStartsWith(path))
             }
-            _ => Err(self.error(format!("expected policy filter (METHOD, READS, WRITES, PATH), got {}", self.peek_kind()))),
+            _ => Err(self.error(format!(
+                "expected policy filter (METHOD, READS, WRITES, PATH), got {}",
+                self.peek_kind()
+            ))),
         }
     }
 
@@ -1947,6 +2105,14 @@ impl Parser {
                 self.advance();
                 let name = self.expect_ident()?;
                 Ok(RequireClause::Guard(name))
+            }
+            TokenKind::Idempotency => {
+                self.advance();
+                Ok(RequireClause::Idempotency)
+            }
+            TokenKind::Fanout => {
+                self.advance();
+                Ok(RequireClause::Fanout)
             }
             _ => Err(self.error(format!("expected REQUIRE target, got {}", self.peek_kind()))),
         }
@@ -1994,12 +2160,24 @@ impl Parser {
 
         let mut inputs = Vec::new();
         let mut outputs = Vec::new();
+        let mut pure = false;
+        let mut idempotency_input = None;
         let mut timeout = None;
         let mut retry = None;
         let mut cache_ttl = None;
 
         while !self.check_dedent() && !self.is_at_end() {
             match self.peek_kind() {
+                TokenKind::Pure => {
+                    self.advance();
+                    pure = true;
+                    self.expect_newline()?;
+                }
+                TokenKind::Idempotency => {
+                    self.advance();
+                    idempotency_input = Some(self.expect_ident()?);
+                    self.expect_newline()?;
+                }
                 TokenKind::Input => {
                     self.advance();
                     while matches!(self.peek_kind(), TokenKind::Ident(_)) {
@@ -2032,7 +2210,9 @@ impl Parser {
                         "exponential" => RetryStrategy::Exponential,
                         "linear" => RetryStrategy::Linear,
                         "none" => RetryStrategy::None,
-                        _ => return Err(self.error(format!("unknown retry strategy: {strat_name}"))),
+                        _ => {
+                            return Err(self.error(format!("unknown retry strategy: {strat_name}")));
+                        }
                     };
                     retry = Some(RetryConfig { count, strategy });
                     self.expect_newline()?;
@@ -2049,6 +2229,8 @@ impl Parser {
 
         Ok(ServiceMethod {
             name,
+            pure,
+            idempotency_input,
             inputs,
             outputs,
             timeout,
@@ -2114,8 +2296,13 @@ impl Parser {
             auth,
             body,
             steps,
-            on_failure: OnFailure { run_compensations: true },
-            on_success: OnSuccess { effects, return_stmt },
+            on_failure: OnFailure {
+                run_compensations: true,
+            },
+            on_success: OnSuccess {
+                effects,
+                return_stmt,
+            },
             span,
         })
     }
@@ -2188,8 +2375,10 @@ impl Parser {
             TokenKind::Guard => Ok(FlowStep::Guard(self.parse_guard_step()?)),
             TokenKind::Let => Ok(FlowStep::Let(self.parse_let_step()?)),
             TokenKind::Insert => Ok(FlowStep::Insert(self.parse_insert_step()?)),
+            TokenKind::Upsert => Ok(FlowStep::Upsert(self.parse_upsert_step()?)),
             TokenKind::Update => Ok(FlowStep::Update(self.parse_update_step()?)),
             TokenKind::Delete => Ok(FlowStep::Delete(self.parse_delete_step()?)),
+            TokenKind::Fanout => Ok(FlowStep::Fanout(self.parse_fanout_step()?)),
             TokenKind::Effect => Ok(FlowStep::Effect(self.parse_effect_step()?)),
             TokenKind::Match => Ok(FlowStep::Match(self.parse_match_step()?)),
             TokenKind::Set => Ok(FlowStep::Set(self.parse_set_step()?)),
@@ -2233,7 +2422,11 @@ impl Parser {
                     backend = Some(match b.as_str() {
                         "local" => StorageBackend::Local,
                         "s3" => StorageBackend::S3,
-                        _ => return Err(self.error(format!("unknown storage backend: {b}, expected local or s3"))),
+                        _ => {
+                            return Err(self.error(format!(
+                                "unknown storage backend: {b}, expected local or s3"
+                            )));
+                        }
                     });
                     self.expect_newline()?;
                 }
@@ -2253,7 +2446,11 @@ impl Parser {
                     access = Some(match a.as_str() {
                         "public" => StorageAccess::Public,
                         "private" => StorageAccess::Private,
-                        _ => return Err(self.error(format!("unknown access level: {a}, expected public or private"))),
+                        _ => {
+                            return Err(self.error(format!(
+                                "unknown access level: {a}, expected public or private"
+                            )));
+                        }
                     });
                     self.expect_newline()?;
                 }
@@ -2264,8 +2461,18 @@ impl Parser {
                 }
                 TokenKind::Types => {
                     self.advance();
-                    while matches!(self.peek_kind(), TokenKind::Ident(_)) {
-                        types.push(self.expect_ident()?);
+                    while matches!(
+                        self.peek_kind(),
+                        TokenKind::Ident(_) | TokenKind::Path(_) | TokenKind::StringLit(_)
+                    ) {
+                        let mut allowed_type = self.expect_ident_or_path()?;
+                        if !allowed_type.contains('/') {
+                            if let TokenKind::Path(suffix) = self.peek_kind() {
+                                self.advance();
+                                allowed_type.push_str(&suffix);
+                            }
+                        }
+                        types.push(allowed_type);
                     }
                     self.expect_newline()?;
                 }
@@ -2273,10 +2480,9 @@ impl Parser {
                     self.advance();
                 }
                 _ => {
-                    return Err(self.error(format!(
-                        "unexpected token in STORAGE: {}",
-                        self.peek_kind()
-                    )));
+                    return Err(
+                        self.error(format!("unexpected token in STORAGE: {}", self.peek_kind()))
+                    );
                 }
             }
         }
@@ -2348,7 +2554,11 @@ impl Parser {
                     self.expect(TokenKind::Arrow)?;
                     let target = self.expect_ident()?;
                     self.expect_newline()?;
-                    routes.push(RouteDef { method, path, target });
+                    routes.push(RouteDef {
+                        method,
+                        path,
+                        target,
+                    });
                 }
                 TokenKind::Expose => {
                     self.advance();
@@ -2398,7 +2608,10 @@ impl Parser {
                     self.expect(TokenKind::Sunset)?;
                     let sunset = self.expect_string()?;
                     self.expect_newline()?;
-                    deprecate = Some(DeprecateDef { version: ver, sunset });
+                    deprecate = Some(DeprecateDef {
+                        version: ver,
+                        sunset,
+                    });
                 }
                 _ => break,
             }
@@ -2500,8 +2713,14 @@ impl Parser {
             _ => return Err(self.error(format!("expected 'ws' or 'sse', got '{transport_str}'"))),
         };
         let path = match self.peek_kind() {
-            TokenKind::Path(s) => { self.advance(); s }
-            TokenKind::StringLit(s) => { self.advance(); s }
+            TokenKind::Path(s) => {
+                self.advance();
+                s
+            }
+            TokenKind::StringLit(s) => {
+                self.advance();
+                s
+            }
             other => return Err(self.error(format!("expected path, got {other}"))),
         };
         self.expect_newline()?;
@@ -2536,11 +2755,20 @@ impl Parser {
                             let ty = self.parse_type_expr()?;
                             let modifiers = self.parse_modifiers()?;
                             self.expect_newline()?;
-                            fields.push(FieldDef { name: field_name, ty, modifiers, span: field_span });
+                            fields.push(FieldDef {
+                                name: field_name,
+                                ty,
+                                modifiers,
+                                span: field_span,
+                            });
                         }
                         self.expect_dedent()?;
                     }
-                    events.push(StreamEvent { name: evt_name, fields, span: evt_span });
+                    events.push(StreamEvent {
+                        name: evt_name,
+                        fields,
+                        span: evt_span,
+                    });
                 }
                 TokenKind::Receive => {
                     self.advance();
@@ -2559,7 +2787,11 @@ impl Parser {
                                     steps.push(self.parse_flow_step()?);
                                 }
                                 self.expect_dedent()?;
-                                receivers.push(StreamReceiver { event, steps, span: recv_span });
+                                receivers.push(StreamReceiver {
+                                    event,
+                                    steps,
+                                    span: recv_span,
+                                });
                             }
                             _ => break,
                         }
@@ -2571,7 +2803,16 @@ impl Parser {
         }
         self.expect_dedent()?;
 
-        Ok(StreamDef { name, transport, path, realm, auth, events, receivers, span })
+        Ok(StreamDef {
+            name,
+            transport,
+            path,
+            realm,
+            auth,
+            events,
+            receivers,
+            span,
+        })
     }
 
     fn parse_dot_path(&mut self) -> AxisResult<DotPath> {
@@ -2593,15 +2834,12 @@ impl Parser {
     }
 
     fn current_span(&self) -> Span {
-        self.tokens
-            .get(self.pos)
-            .map(|t| t.span)
-            .unwrap_or(Span {
-                offset: 0,
-                len: 0,
-                line: 0,
-                col: 0,
-            })
+        self.tokens.get(self.pos).map(|t| t.span).unwrap_or(Span {
+            offset: 0,
+            len: 0,
+            line: 0,
+            col: 0,
+        })
     }
 
     fn advance(&mut self) {
@@ -2702,7 +2940,11 @@ impl Parser {
                 "s" => DurationUnit::Seconds,
                 "m" => DurationUnit::Minutes,
                 "h" => DurationUnit::Hours,
-                _ => return Err(self.error(format!("unknown duration unit: {u}, expected ms/s/m/h"))),
+                _ => {
+                    return Err(
+                        self.error(format!("unknown duration unit: {u}, expected ms/s/m/h"))
+                    );
+                }
             }
         } else {
             DurationUnit::Seconds
@@ -2802,7 +3044,13 @@ impl Parser {
             steps.push(self.parse_flow_step()?);
         }
         self.expect_dedent()?;
-        Ok(EachStep { binding, source, parallel, steps, span })
+        Ok(EachStep {
+            binding,
+            source,
+            parallel,
+            steps,
+            span,
+        })
     }
 
     fn parse_try_step(&mut self) -> AxisResult<TryStep> {
@@ -2822,7 +3070,11 @@ impl Parser {
             recover.push(self.parse_flow_step()?);
         }
         self.expect_dedent()?;
-        Ok(TryStep { body, recover, span })
+        Ok(TryStep {
+            body,
+            recover,
+            span,
+        })
     }
 
     // --- FUNC ---
@@ -2888,20 +3140,25 @@ impl Parser {
                     steps.push(FlowStep::Guard(self.parse_guard_step()?));
                 }
                 _ => {
-                    return Err(self.error(format!(
-                        "unexpected token in FUNC: {}",
-                        self.peek_kind()
-                    )));
+                    return Err(
+                        self.error(format!("unexpected token in FUNC: {}", self.peek_kind()))
+                    );
                 }
             }
         }
         self.expect_dedent()?;
 
-        let return_expr = return_expr.ok_or_else(|| {
-            self.error("FUNC requires a RETURN expression")
-        })?;
+        let return_expr =
+            return_expr.ok_or_else(|| self.error("FUNC requires a RETURN expression"))?;
 
-        Ok(FuncDef { name, inputs, output, steps, return_expr, span })
+        Ok(FuncDef {
+            name,
+            inputs,
+            output,
+            steps,
+            return_expr,
+            span,
+        })
     }
 
     // --- Collection expression parsers ---
@@ -2940,7 +3197,12 @@ impl Parser {
             TokenKind::Avg => AggregateOp::Avg,
             TokenKind::Min => AggregateOp::Min,
             TokenKind::Max => AggregateOp::Max,
-            _ => return Err(self.error(format!("expected aggregate op after REDUCE source, got {}", self.peek_kind()))),
+            _ => {
+                return Err(self.error(format!(
+                    "expected aggregate op after REDUCE source, got {}",
+                    self.peek_kind()
+                )));
+            }
         };
         self.advance();
         let field = self.expect_ident()?;
@@ -2980,7 +3242,10 @@ impl Parser {
         self.expect(TokenKind::Format)?;
         let template = self.expect_string()?;
         let mut args = Vec::new();
-        while !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent) {
+        while !matches!(
+            self.peek_kind(),
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent
+        ) {
             args.push(self.parse_inline_expr()?);
         }
         self.expect_newline()?;
@@ -2991,7 +3256,10 @@ impl Parser {
         self.expect(TokenKind::Func)?;
         let name = self.expect_ident()?;
         let mut args = Vec::new();
-        while !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent) {
+        while !matches!(
+            self.peek_kind(),
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent
+        ) {
             args.push(self.parse_inline_expr()?);
         }
         self.expect_newline()?;
@@ -3002,7 +3270,10 @@ impl Parser {
         self.expect(TokenKind::Render)?;
         let template = self.expect_string()?;
         let mut vars = Vec::new();
-        while !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent) {
+        while !matches!(
+            self.peek_kind(),
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent
+        ) {
             let key = self.expect_ident()?;
             let val = self.parse_inline_expr()?;
             vars.push((key, val));
@@ -3015,7 +3286,10 @@ impl Parser {
         self.expect(TokenKind::Translate)?;
         let key = self.expect_string()?;
         let mut vars = Vec::new();
-        while !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent) {
+        while !matches!(
+            self.peek_kind(),
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Dedent
+        ) {
             let name = self.expect_ident()?;
             let val = self.parse_inline_expr()?;
             vars.push((name, val));
@@ -3078,7 +3352,10 @@ mod tests {
                 assert_eq!(s.indexes.len(), 2);
                 assert_eq!(s.indexes[0].fields.len(), 2);
                 assert_eq!(s.indexes[0].fields[0].name, "user_id");
-                assert!(matches!(s.indexes[0].fields[1].suffix, Some(IndexSuffix::Desc)));
+                assert!(matches!(
+                    s.indexes[0].fields[1].suffix,
+                    Some(IndexSuffix::Desc)
+                ));
             }
             _ => panic!("expected Source"),
         }
@@ -3128,7 +3405,9 @@ mod tests {
                 assert!(matches!(&f.scope, Some(ScopeDecl::Tenant(_))));
                 assert_eq!(f.steps.len(), 2); // LET + GUARD
                 assert_eq!(f.return_stmt.code, 200);
-                assert!(matches!(&f.return_stmt.body, Some(ReturnBody::Binding(s)) if s == "booking"));
+                assert!(
+                    matches!(&f.return_stmt.body, Some(ReturnBody::Binding(s)) if s == "booking")
+                );
             }
             _ => panic!("expected Flow"),
         }
@@ -3153,7 +3432,9 @@ mod tests {
                 assert!(f.body.is_some());
                 assert_eq!(f.body.as_ref().unwrap().fields.len(), 2);
                 assert!(matches!(&f.steps[0], FlowStep::Insert(i) if i.source == "users"));
-                assert!(matches!(&f.steps[0], FlowStep::Insert(i) if i.binding == Some("user".to_string())));
+                assert!(
+                    matches!(&f.steps[0], FlowStep::Insert(i) if i.binding == Some("user".to_string()))
+                );
             }
             _ => panic!("expected Flow"),
         }
@@ -3176,14 +3457,26 @@ mod tests {
                 match &f.steps[0] {
                     FlowStep::Let(l) => {
                         assert_eq!(l.name, "nights");
-                        assert!(matches!(&l.expr, Expr::Binary { op: BinaryOp::DaysBetween, .. }));
+                        assert!(matches!(
+                            &l.expr,
+                            Expr::Binary {
+                                op: BinaryOp::DaysBetween,
+                                ..
+                            }
+                        ));
                     }
                     _ => panic!("expected Let"),
                 }
                 match &f.steps[1] {
                     FlowStep::Let(l) => {
                         assert_eq!(l.name, "total");
-                        assert!(matches!(&l.expr, Expr::Binary { op: BinaryOp::Mul, .. }));
+                        assert!(matches!(
+                            &l.expr,
+                            Expr::Binary {
+                                op: BinaryOp::Mul,
+                                ..
+                            }
+                        ));
                     }
                     _ => panic!("expected Let"),
                 }
@@ -3232,7 +3525,9 @@ FLOW get_user get /users/:id
             Construct::Policy(p) => {
                 assert_eq!(p.name, "require_rate_limit_on_writes");
                 assert_eq!(p.applies_to.filters.len(), 1);
-                assert!(matches!(&p.applies_to.filters[0], PolicyFilter::MethodIn(m) if m.len() == 4));
+                assert!(
+                    matches!(&p.applies_to.filters[0], PolicyFilter::MethodIn(m) if m.len() == 4)
+                );
                 assert_eq!(p.requires.len(), 1);
                 assert!(matches!(&p.requires[0], RequireClause::Limit));
             }
@@ -3251,7 +3546,9 @@ FLOW get_user get /users/:id
         match &program.constructs[0] {
             Construct::Policy(p) => {
                 assert_eq!(p.applies_to.filters.len(), 1);
-                assert!(matches!(&p.applies_to.filters[0], PolicyFilter::Writes(s) if s == "bookings"));
+                assert!(
+                    matches!(&p.applies_to.filters[0], PolicyFilter::Writes(s) if s == "bookings")
+                );
                 assert_eq!(p.requires.len(), 2);
                 assert!(matches!(&p.requires[0], RequireClause::Rule(r) if r == "fraud_score_ok"));
                 assert!(matches!(&p.requires[1], RequireClause::Auth(None)));
@@ -3268,15 +3565,13 @@ FLOW get_user get /users/:id
 "#;
         let program = parse(input).unwrap();
         match &program.constructs[0] {
-            Construct::Flow(f) => {
-                match &f.auth {
-                    Some(AuthDecl::WebhookSignature { secret, algorithm }) => {
-                        assert_eq!(secret, "stripe_secret");
-                        assert_eq!(algorithm, "sha256");
-                    }
-                    other => panic!("expected WebhookSignature, got {other:?}"),
+            Construct::Flow(f) => match &f.auth {
+                Some(AuthDecl::WebhookSignature { secret, algorithm }) => {
+                    assert_eq!(secret, "stripe_secret");
+                    assert_eq!(algorithm, "sha256");
                 }
-            }
+                other => panic!("expected WebhookSignature, got {other:?}"),
+            },
             _ => panic!("expected Flow"),
         }
     }
@@ -3291,7 +3586,9 @@ FLOW get_user get /users/:id
         match &program.constructs[0] {
             Construct::Policy(p) => {
                 assert_eq!(p.applies_to.filters.len(), 1);
-                assert!(matches!(&p.applies_to.filters[0], PolicyFilter::PathStartsWith(s) if s == "/admin"));
+                assert!(
+                    matches!(&p.applies_to.filters[0], PolicyFilter::PathStartsWith(s) if s == "/admin")
+                );
                 assert_eq!(p.requires.len(), 1);
             }
             _ => panic!("expected Policy"),
@@ -3383,7 +3680,8 @@ FLOW get_user get /users/:id
   ENDPOINT stripe
   AUTH bearer VAULT stripe_api_key
   METHOD hold
-    INPUT amount DECIMAL currency STRING 10
+    IDEMPOTENCY operation_id
+    INPUT operation_id UUID amount DECIMAL currency STRING 10
     OUTPUT hold_id STRING 100 status STRING 20
     TIMEOUT 30 s
     RETRY 3 BACKOFF exponential
@@ -3402,14 +3700,24 @@ FLOW get_user get /users/:id
                 assert_eq!(s.vault_key, "stripe_api_key");
                 assert_eq!(s.methods.len(), 2);
                 assert_eq!(s.methods[0].name, "hold");
-                assert_eq!(s.methods[0].inputs.len(), 2);
+                assert_eq!(
+                    s.methods[0].idempotency_input.as_deref(),
+                    Some("operation_id")
+                );
+                assert_eq!(s.methods[0].inputs.len(), 3);
                 assert_eq!(s.methods[0].outputs.len(), 2);
                 assert!(s.methods[0].timeout.is_some());
                 assert_eq!(s.methods[0].timeout.as_ref().unwrap().value, 30);
-                assert_eq!(s.methods[0].timeout.as_ref().unwrap().unit, DurationUnit::Seconds);
+                assert_eq!(
+                    s.methods[0].timeout.as_ref().unwrap().unit,
+                    DurationUnit::Seconds
+                );
                 assert!(s.methods[0].retry.is_some());
                 assert_eq!(s.methods[0].retry.as_ref().unwrap().count, 3);
-                assert!(matches!(s.methods[0].retry.as_ref().unwrap().strategy, RetryStrategy::Exponential));
+                assert!(matches!(
+                    s.methods[0].retry.as_ref().unwrap().strategy,
+                    RetryStrategy::Exponential
+                ));
                 assert_eq!(s.methods[1].name, "refund");
             }
             _ => panic!("expected Service"),
@@ -3422,6 +3730,7 @@ FLOW get_user get /users/:id
   ENDPOINT google_maps
   AUTH query_param VAULT google_maps_key
   METHOD reverse
+    PURE
     INPUT lat DECIMAL lng DECIMAL
     OUTPUT address STRING 255 city STRING 100 country STRING 100
     TIMEOUT 5 s
@@ -3432,6 +3741,7 @@ FLOW get_user get /users/:id
         match &program.constructs[0] {
             Construct::Service(s) => {
                 assert_eq!(s.methods[0].cache_ttl, Some(86400));
+                assert!(s.methods[0].pure);
             }
             _ => panic!("expected Service"),
         }
@@ -3468,9 +3778,15 @@ FLOW get_user get /users/:id
                 assert_eq!(s.exposes[0].shape, "Booking");
                 assert_eq!(s.exposes[0].alias, Some("BookingResponse".into()));
                 assert_eq!(s.exposes[0].fields.len(), 5);
-                assert!(matches!(&s.exposes[0].fields[0], ExposeField::Field { name, .. } if name == "id"));
-                assert!(matches!(&s.exposes[0].fields[2], ExposeField::Hide(f) if f == "total_price"));
-                assert!(matches!(&s.exposes[0].fields[4], ExposeField::Rename { from, to } if from == "note" && to == "special_requests"));
+                assert!(
+                    matches!(&s.exposes[0].fields[0], ExposeField::Field { name, .. } if name == "id")
+                );
+                assert!(
+                    matches!(&s.exposes[0].fields[2], ExposeField::Hide(f) if f == "total_price")
+                );
+                assert!(
+                    matches!(&s.exposes[0].fields[4], ExposeField::Rename { from, to } if from == "note" && to == "special_requests")
+                );
             }
             _ => panic!("expected Surface"),
         }
@@ -3518,7 +3834,9 @@ FLOW get_user get /users/:id
                 assert!(matches!(&m.ops[2], MigrateOp::Drop(f) if f == "price_per_night"));
                 assert!(matches!(&m.ops[3], MigrateOp::Add(f) if f.name == "cancellation_policy"));
                 assert!(matches!(&m.ops[4], MigrateOp::Add(f) if f.name == "updated_at"));
-                assert!(matches!(&m.ops[5], MigrateOp::Rename { from, to } if from == "note" && to == "special_requests"));
+                assert!(
+                    matches!(&m.ops[5], MigrateOp::Rename { from, to } if from == "note" && to == "special_requests")
+                );
             }
             _ => panic!("expected Migrate"),
         }
@@ -3536,7 +3854,9 @@ FLOW get_user get /users/:id
             Construct::Migrate(m) => {
                 assert_eq!(m.ops.len(), 2);
                 assert!(matches!(&m.ops[0], MigrateOp::Copy(f) if f.len() == 2));
-                assert!(matches!(&m.ops[1], MigrateOp::Compute { field, .. } if field == "total_price"));
+                assert!(
+                    matches!(&m.ops[1], MigrateOp::Compute { field, .. } if field == "total_price")
+                );
             }
             _ => panic!("expected Migrate"),
         }
@@ -3592,7 +3912,9 @@ FLOW get_user get /users/:id
                 assert!(matches!(s.steps[0].compensate, Compensate::None));
                 assert_eq!(s.steps[1].name, "create_order");
                 assert_eq!(s.steps[1].yields, vec!["order"]);
-                assert!(matches!(&s.steps[1].compensate, Compensate::Steps(steps) if steps.len() == 1));
+                assert!(
+                    matches!(&s.steps[1].compensate, Compensate::Steps(steps) if steps.len() == 1)
+                );
                 assert!(s.on_failure.run_compensations);
                 assert_eq!(s.on_success.effects.len(), 1);
                 assert_eq!(s.on_success.return_stmt.code, 201);
@@ -3636,7 +3958,9 @@ FLOW get_listing get /listings/:id
         match &program.constructs[0] {
             Construct::Flow(f) => {
                 assert_eq!(f.return_stmt.code, 201);
-                assert!(matches!(&f.return_stmt.body, Some(ReturnBody::Binding(n)) if n == "booking"));
+                assert!(
+                    matches!(&f.return_stmt.body, Some(ReturnBody::Binding(n)) if n == "booking")
+                );
                 assert_eq!(f.return_stmt.headers.len(), 2);
                 assert_eq!(f.return_stmt.headers[0].0, "Location");
                 assert_eq!(f.return_stmt.headers[1].0, "X-Idempotency-Key");
@@ -3664,9 +3988,18 @@ SOURCE locations ELASTICSEARCH
         match &program.constructs[1] {
             Construct::Source(s) => {
                 assert_eq!(s.indexes.len(), 3);
-                assert!(matches!(s.indexes[0].fields[0].suffix, Some(IndexSuffix::Geo)));
-                assert!(matches!(s.indexes[1].fields[0].suffix, Some(IndexSuffix::Text)));
-                assert!(matches!(s.indexes[2].fields[0].suffix, Some(IndexSuffix::Keyword)));
+                assert!(matches!(
+                    s.indexes[0].fields[0].suffix,
+                    Some(IndexSuffix::Geo)
+                ));
+                assert!(matches!(
+                    s.indexes[1].fields[0].suffix,
+                    Some(IndexSuffix::Text)
+                ));
+                assert!(matches!(
+                    s.indexes[2].fields[0].suffix,
+                    Some(IndexSuffix::Keyword)
+                ));
             }
             _ => panic!("expected Source"),
         }
@@ -3713,7 +4046,10 @@ FLOW list_bookings get /bookings
         match &program.constructs[0] {
             Construct::Flow(f) => {
                 assert_eq!(f.return_stmt.code, 200);
-                assert!(matches!(&f.return_stmt.body, Some(ReturnBody::Paginated { .. })));
+                assert!(matches!(
+                    &f.return_stmt.body,
+                    Some(ReturnBody::Paginated { .. })
+                ));
             }
             _ => panic!("expected Flow"),
         }
@@ -3740,7 +4076,9 @@ FLOW list_popular get /popular
                     match &l.expr {
                         Expr::Cached { ttl, expr } => {
                             assert_eq!(*ttl, 300);
-                            assert!(matches!(expr.as_ref(), Expr::Query { source, .. } if source == "listings"));
+                            assert!(
+                                matches!(expr.as_ref(), Expr::Query { source, .. } if source == "listings")
+                            );
                         }
                         other => panic!("expected Cached, got {:?}", other),
                     }
@@ -4001,8 +4339,12 @@ FLOW process post /process
         match &program.constructs[0] {
             Construct::Flow(f) => {
                 assert_eq!(f.steps.len(), 3);
-                assert!(matches!(&f.steps[0], FlowStep::Let(l) if matches!(l.expr, Expr::SplitExpr { .. })));
-                assert!(matches!(&f.steps[1], FlowStep::Let(l) if matches!(l.expr, Expr::ReplaceExpr { .. })));
+                assert!(
+                    matches!(&f.steps[0], FlowStep::Let(l) if matches!(l.expr, Expr::SplitExpr { .. }))
+                );
+                assert!(
+                    matches!(&f.steps[1], FlowStep::Let(l) if matches!(l.expr, Expr::ReplaceExpr { .. }))
+                );
                 if let FlowStep::Let(l) = &f.steps[2] {
                     if let Expr::FormatExpr { template, args } = &l.expr {
                         assert_eq!(template, "Hello {0}, welcome to {1}");
@@ -4190,7 +4532,10 @@ FLOW get_user get /users/:id
         match &program.constructs[1] {
             Construct::Flow(f) => {
                 if let FlowStep::Let(l) = &f.steps[0] {
-                    if let Expr::Fetch { or_shape, or_code, .. } = &l.expr {
+                    if let Expr::Fetch {
+                        or_shape, or_code, ..
+                    } = &l.expr
+                    {
                         assert_eq!(*or_code, 404);
                         let shape = or_shape.as_ref().unwrap();
                         assert_eq!(shape.shape, "ApiError");
@@ -4237,5 +4582,48 @@ FUNC process_order
             }
             _ => panic!("expected Func"),
         }
+    }
+
+    #[test]
+    fn test_parse_messenger_transaction_primitives() {
+        let input = r#"FLOW deliver post /messages/:id
+  HEADER idempotency_key STRING 255 REQUIRED
+  BODY Command
+    actor_id UUID REQUIRED
+    recipients LIST UUID REQUIRED
+  IDEMPOTENCY header.idempotency_key SCOPE body.actor_id TTL 86400
+  UPSERT receipts
+    KEY message_id path.id
+    KEY user_id body.actor_id
+    SET status "delivered"
+  AS receipt
+  FANOUT recipient IN body.recipients
+    INSERT deliveries
+      message_id path.id
+      recipient_id recipient
+  RETURN 201 receipt
+
+POLICY reliable_writes
+  APPLIES_TO FLOW ANY
+    WRITES receipts
+    NOT PATH STARTS_WITH "/internal"
+  REQUIRE IDEMPOTENCY
+  REQUIRE FANOUT
+"#;
+        let program = parse(input).unwrap();
+        let Construct::Flow(flow) = &program.constructs[0] else {
+            panic!("expected Flow");
+        };
+        assert_eq!(flow.idempotency.as_ref().unwrap().ttl, 86400);
+        assert!(matches!(flow.steps[0], FlowStep::Upsert(_)));
+        assert!(matches!(flow.steps[1], FlowStep::Fanout(_)));
+
+        let Construct::Policy(policy) = &program.constructs[1] else {
+            panic!("expected Policy");
+        };
+        assert_eq!(policy.applies_to.mode, PolicyMatchMode::Any);
+        assert!(matches!(policy.applies_to.filters[1], PolicyFilter::Not(_)));
+        assert!(matches!(policy.requires[0], RequireClause::Idempotency));
+        assert!(matches!(policy.requires[1], RequireClause::Fanout));
     }
 }

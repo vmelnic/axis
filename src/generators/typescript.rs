@@ -138,8 +138,12 @@ fn gen_validators(program: &Program) -> String {
 
             for param in &flow.params {
                 let zod = type_to_zod(&param.ty, &param.modifiers);
-                writeln!(out, "export const {}_{}ParamSchema = {};",
-                    flow.name, param.name, zod).unwrap();
+                writeln!(
+                    out,
+                    "export const {}_{}ParamSchema = {};",
+                    flow.name, param.name, zod
+                )
+                .unwrap();
             }
         }
     }
@@ -176,7 +180,13 @@ fn gen_queries(program: &Program, codegen: &codegen::CodegenResult) -> String {
         for step in &flow.steps {
             match step {
                 FlowStep::Let(let_step) => {
-                    gen_query_for_expr(&mut out, &flow.name, &let_step.name, &let_step.expr, program);
+                    gen_query_for_expr(
+                        &mut out,
+                        &flow.name,
+                        &let_step.name,
+                        &let_step.expr,
+                        program,
+                    );
                 }
                 FlowStep::Insert(ins) => {
                     gen_insert_query(&mut out, &flow.name, ins, program);
@@ -195,17 +205,32 @@ fn gen_queries(program: &Program, codegen: &codegen::CodegenResult) -> String {
     out
 }
 
-fn gen_query_for_expr(out: &mut String, flow_name: &str, binding: &str, expr: &Expr, program: &Program) {
+fn gen_query_for_expr(
+    out: &mut String,
+    flow_name: &str,
+    binding: &str,
+    expr: &Expr,
+    program: &Program,
+) {
     match expr {
-        Expr::Fetch { source, filters, .. } => {
+        Expr::Fetch {
+            source, filters, ..
+        } => {
             let table = source_table_name(source, program);
             let fn_name = format!("{}_{}", flow_name, binding);
-            writeln!(out, "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{").unwrap();
+            writeln!(
+                out,
+                "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{"
+            )
+            .unwrap();
             let mut where_parts = Vec::new();
-            let mut param_idx = 1;
-            for f in filters {
-                where_parts.push(format!("{} {} ${}", f.field, filter_op_sql(&f.op), param_idx));
-                param_idx += 1;
+            for (param_idx, f) in (1..).zip(filters) {
+                where_parts.push(format!(
+                    "{} {} ${}",
+                    f.field,
+                    filter_op_sql(&f.op),
+                    param_idx
+                ));
             }
             let where_clause = if where_parts.is_empty() {
                 String::new()
@@ -213,24 +238,43 @@ fn gen_query_for_expr(out: &mut String, flow_name: &str, binding: &str, expr: &E
                 format!(" WHERE {}", where_parts.join(" AND "))
             };
             writeln!(out, "  const {{ rows }} = await pool.query(").unwrap();
-            writeln!(out, "    `SELECT * FROM \"{table}\"{where_clause} LIMIT 1`,").unwrap();
+            writeln!(
+                out,
+                "    `SELECT * FROM \"{table}\"{where_clause} LIMIT 1`,"
+            )
+            .unwrap();
             if !filters.is_empty() {
-                let params: Vec<String> = filters.iter().map(|f| format!("params[\"{}\"]", expr_to_param(&f.value))).collect();
+                let params: Vec<String> = filters
+                    .iter()
+                    .map(|f| format!("params[\"{}\"]", expr_to_param(&f.value)))
+                    .collect();
                 writeln!(out, "    [{}]", params.join(", ")).unwrap();
             }
             writeln!(out, "  );").unwrap();
             writeln!(out, "  return rows[0] ?? null;").unwrap();
             writeln!(out, "}}\n").unwrap();
         }
-        Expr::Query { source, filters, sorts, .. } => {
+        Expr::Query {
+            source,
+            filters,
+            sorts,
+            ..
+        } => {
             let table = source_table_name(source, program);
             let fn_name = format!("{}_{}", flow_name, binding);
-            writeln!(out, "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{").unwrap();
+            writeln!(
+                out,
+                "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{"
+            )
+            .unwrap();
             let mut where_parts = Vec::new();
-            let mut param_idx = 1;
-            for f in filters {
-                where_parts.push(format!("{} {} ${}", f.field, filter_op_sql(&f.op), param_idx));
-                param_idx += 1;
+            for (param_idx, f) in (1..).zip(filters) {
+                where_parts.push(format!(
+                    "{} {} ${}",
+                    f.field,
+                    filter_op_sql(&f.op),
+                    param_idx
+                ));
             }
             let where_clause = if where_parts.is_empty() {
                 String::new()
@@ -240,16 +284,29 @@ fn gen_query_for_expr(out: &mut String, flow_name: &str, binding: &str, expr: &E
             let order_clause = if sorts.is_empty() {
                 String::new()
             } else {
-                let parts: Vec<String> = sorts.iter().map(|s| {
-                    let dir = match s.direction { SortDirection::Asc => "ASC", SortDirection::Desc => "DESC" };
-                    format!("{} {dir}", s.field)
-                }).collect();
+                let parts: Vec<String> = sorts
+                    .iter()
+                    .map(|s| {
+                        let dir = match s.direction {
+                            SortDirection::Asc => "ASC",
+                            SortDirection::Desc => "DESC",
+                        };
+                        format!("{} {dir}", s.field)
+                    })
+                    .collect();
                 format!(" ORDER BY {}", parts.join(", "))
             };
             writeln!(out, "  const {{ rows }} = await pool.query(").unwrap();
-            writeln!(out, "    `SELECT * FROM \"{table}\"{where_clause}{order_clause}`,").unwrap();
+            writeln!(
+                out,
+                "    `SELECT * FROM \"{table}\"{where_clause}{order_clause}`,"
+            )
+            .unwrap();
             if !filters.is_empty() {
-                let params: Vec<String> = filters.iter().map(|f| format!("params[\"{}\"]", expr_to_param(&f.value))).collect();
+                let params: Vec<String> = filters
+                    .iter()
+                    .map(|f| format!("params[\"{}\"]", expr_to_param(&f.value)))
+                    .collect();
                 writeln!(out, "    [{}]", params.join(", ")).unwrap();
             }
             writeln!(out, "  );").unwrap();
@@ -263,15 +320,29 @@ fn gen_query_for_expr(out: &mut String, flow_name: &str, binding: &str, expr: &E
 fn gen_insert_query(out: &mut String, flow_name: &str, ins: &InsertStep, program: &Program) {
     let table = source_table_name(&ins.source, program);
     let fn_name = format!("{}_insert_{}", flow_name, ins.source);
-    writeln!(out, "export async function {fn_name}(pool: Pool, data: Record<string, unknown>) {{").unwrap();
+    writeln!(
+        out,
+        "export async function {fn_name}(pool: Pool, data: Record<string, unknown>) {{"
+    )
+    .unwrap();
 
     let cols: Vec<&str> = ins.fields.iter().map(|(name, _)| name.as_str()).collect();
     let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
-    let values: Vec<String> = ins.fields.iter().map(|(_, expr)| format!("data[\"{}\"]", expr_to_param(expr))).collect();
+    let values: Vec<String> = ins
+        .fields
+        .iter()
+        .map(|(_, expr)| format!("data[\"{}\"]", expr_to_param(expr)))
+        .collect();
 
     writeln!(out, "  const {{ rows }} = await pool.query(").unwrap();
-    writeln!(out, "    `INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *`,",
-        table, cols.join(", "), placeholders.join(", ")).unwrap();
+    writeln!(
+        out,
+        "    `INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *`,",
+        table,
+        cols.join(", "),
+        placeholders.join(", ")
+    )
+    .unwrap();
     writeln!(out, "    [{}]", values.join(", ")).unwrap();
     writeln!(out, "  );").unwrap();
     writeln!(out, "  return rows[0];").unwrap();
@@ -280,19 +351,31 @@ fn gen_insert_query(out: &mut String, flow_name: &str, ins: &InsertStep, program
 
 fn gen_update_query(out: &mut String, flow_name: &str, upd: &UpdateStep) {
     let fn_name = format!("{}_update_{}", flow_name, upd.source);
-    writeln!(out, "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{").unwrap();
+    writeln!(
+        out,
+        "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{"
+    )
+    .unwrap();
 
     let mut param_idx = 1;
-    let set_parts: Vec<String> = upd.sets.iter().map(|s| {
-        let p = format!("{} = ${param_idx}", s.field);
-        param_idx += 1;
-        p
-    }).collect();
-    let where_parts: Vec<String> = upd.wheres.iter().map(|w| {
-        let p = format!("{} {} ${param_idx}", w.field, filter_op_sql_compare(&w.op));
-        param_idx += 1;
-        p
-    }).collect();
+    let set_parts: Vec<String> = upd
+        .sets
+        .iter()
+        .map(|s| {
+            let p = format!("{} = ${param_idx}", s.field);
+            param_idx += 1;
+            p
+        })
+        .collect();
+    let where_parts: Vec<String> = upd
+        .wheres
+        .iter()
+        .map(|w| {
+            let p = format!("{} {} ${param_idx}", w.field, filter_op_sql_compare(&w.op));
+            param_idx += 1;
+            p
+        })
+        .collect();
 
     let set_clause = set_parts.join(", ");
     let where_clause = if where_parts.is_empty() {
@@ -302,7 +385,12 @@ fn gen_update_query(out: &mut String, flow_name: &str, upd: &UpdateStep) {
     };
 
     writeln!(out, "  const {{ rowCount }} = await pool.query(").unwrap();
-    writeln!(out, "    `UPDATE \"{}\" SET {set_clause}{where_clause}`,", upd.source).unwrap();
+    writeln!(
+        out,
+        "    `UPDATE \"{}\" SET {set_clause}{where_clause}`,",
+        upd.source
+    )
+    .unwrap();
 
     let mut values = Vec::new();
     for s in &upd.sets {
@@ -319,14 +407,22 @@ fn gen_update_query(out: &mut String, flow_name: &str, upd: &UpdateStep) {
 
 fn gen_delete_query(out: &mut String, flow_name: &str, del: &DeleteStep) {
     let fn_name = format!("{}_delete_{}", flow_name, del.source);
-    writeln!(out, "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{").unwrap();
+    writeln!(
+        out,
+        "export async function {fn_name}(pool: Pool, params: Record<string, unknown>) {{"
+    )
+    .unwrap();
 
     let mut param_idx = 1;
-    let where_parts: Vec<String> = del.wheres.iter().map(|w| {
-        let p = format!("{} {} ${param_idx}", w.field, filter_op_sql_compare(&w.op));
-        param_idx += 1;
-        p
-    }).collect();
+    let where_parts: Vec<String> = del
+        .wheres
+        .iter()
+        .map(|w| {
+            let p = format!("{} {} ${param_idx}", w.field, filter_op_sql_compare(&w.op));
+            param_idx += 1;
+            p
+        })
+        .collect();
     let where_clause = if where_parts.is_empty() {
         String::new()
     } else {
@@ -336,7 +432,11 @@ fn gen_delete_query(out: &mut String, flow_name: &str, del: &DeleteStep) {
     writeln!(out, "  const {{ rowCount }} = await pool.query(").unwrap();
     writeln!(out, "    `DELETE FROM \"{}\"{}`,", del.source, where_clause).unwrap();
     if !del.wheres.is_empty() {
-        let values: Vec<String> = del.wheres.iter().map(|w| format!("params[\"{}\"]", expr_to_param(&w.value))).collect();
+        let values: Vec<String> = del
+            .wheres
+            .iter()
+            .map(|w| format!("params[\"{}\"]", expr_to_param(&w.value)))
+            .collect();
         writeln!(out, "    [{}]", values.join(", ")).unwrap();
     }
     writeln!(out, "  );").unwrap();
@@ -348,18 +448,60 @@ fn gen_handlers(program: &Program, codegen: &codegen::CodegenResult) -> String {
     let mut out = String::new();
     out.push_str("// Generated by Axis compiler — do not edit\n");
     out.push_str("import type { Request, Response } from \"express\";\n");
-    out.push_str("import type { Pool } from \"pg\";\n\n");
+    out.push_str("import type { Pool } from \"pg\";\n");
+    if program
+        .constructs
+        .iter()
+        .any(|construct| matches!(construct, Construct::Flow(flow) if flow.idempotency.is_some()))
+    {
+        out.push_str("import { createHash } from \"node:crypto\";\n");
+        out.push_str("\nfunction axisCanonical(value: unknown): string {\n");
+        out.push_str(
+            "  if (Array.isArray(value)) return '[' + value.map(axisCanonical).join(',') + ']';\n",
+        );
+        out.push_str("  if (value !== null && typeof value === 'object') {\n");
+        out.push_str("    const object = value as Record<string, unknown>;\n");
+        out.push_str("    return '{' + Object.keys(object).sort().map((key) => JSON.stringify(key) + ':' + axisCanonical(object[key])).join(',') + '}';\n");
+        out.push_str("  }\n");
+        out.push_str("  return JSON.stringify(value);\n");
+        out.push_str("}\n\n");
+        out.push_str("function axisScalar(value: unknown, name: string, max: number): string {\n");
+        out.push_str("  if (!['string', 'number', 'boolean'].includes(typeof value)) throw { statusCode: 400, message: 'IDEMPOTENCY ' + name + ' must be a scalar' };\n");
+        out.push_str("  const result = String(value);\n");
+        out.push_str("  if (result.length === 0 || Buffer.byteLength(result) > max) throw { statusCode: 400, message: 'IDEMPOTENCY ' + name + ' must contain 1 to ' + max + ' bytes' };\n");
+        out.push_str("  return result;\n");
+        out.push_str("}\n\n");
+    } else {
+        out.push('\n');
+    }
 
     for route in &codegen.routes {
         let flow = program.constructs.iter().find_map(|c| {
             if let Construct::Flow(f) = c {
-                if f.name == route.name { return Some(f); }
+                if f.name == route.name {
+                    return Some(f);
+                }
             }
             None
         });
 
-        writeln!(out, "export async function {}(req: Request, res: Response, pool: Pool) {{", route.name).unwrap();
+        let idempotency = flow.and_then(|flow| flow.idempotency.as_ref());
+        writeln!(
+            out,
+            "export async function {}(req: Request, res: Response, pool: Pool) {{",
+            route.name
+        )
+        .unwrap();
+        if idempotency.is_some() {
+            writeln!(out, "  const _client = await pool.connect();").unwrap();
+            writeln!(out, "  const _db = _client;").unwrap();
+        } else {
+            writeln!(out, "  const _db = pool;").unwrap();
+        }
         writeln!(out, "  try {{").unwrap();
+        if idempotency.is_some() {
+            writeln!(out, "    await _db.query('BEGIN');").unwrap();
+        }
 
         if let Some(f) = flow {
             if f.body.is_some() {
@@ -370,19 +512,139 @@ fn gen_handlers(program: &Program, codegen: &codegen::CodegenResult) -> String {
             }
         }
 
-        for instr in &route.instructions {
-            gen_instruction(&mut out, instr, "    ");
+        if let (Some(flow), Some(declaration)) = (flow, idempotency) {
+            let key = idempotency_path_ts(&declaration.key);
+            let scope = idempotency_path_ts(&declaration.scope);
+            writeln!(
+                out,
+                "    const _idempotencyKey = axisScalar({key}, 'key', 255);"
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "    const _idempotencyScope = axisScalar({scope}, 'scope', 512);"
+            )
+            .unwrap();
+            writeln!(out, "    const _requestHash = createHash('sha256').update(axisCanonical({{ flow: '{}', path: req.params, query: req.query, body: req.body }})).digest('hex');", flow.name).unwrap();
+            writeln!(out, "    const _now = Math.floor(Date.now() / 1000);").unwrap();
+            writeln!(out, "    const _expiresAt = _now + {};", declaration.ttl).unwrap();
+            writeln!(out, "    await _db.query('DELETE FROM _axis_idempotency WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3 AND expires_at <= $4', ['{}', _idempotencyScope, _idempotencyKey, _now]);", flow.name).unwrap();
+            writeln!(out, "    const _reservation = await _db.query(").unwrap();
+            writeln!(out, "      \"INSERT INTO _axis_idempotency (flow_name, scope_key, idempotency_key, request_hash, state, expires_at, created_at, updated_at) VALUES ($1, $2, $3, $4, 'processing', $5, $6, $6) ON CONFLICT (flow_name, scope_key, idempotency_key) DO NOTHING RETURNING request_hash\",").unwrap();
+            writeln!(
+                out,
+                "      ['{}', _idempotencyScope, _idempotencyKey, _requestHash, _expiresAt, _now],",
+                flow.name
+            )
+            .unwrap();
+            writeln!(out, "    );").unwrap();
+            writeln!(out, "    if (_reservation.rowCount === 0) {{").unwrap();
+            writeln!(out, "      const {{ rows: [_stored] }} = await _db.query(").unwrap();
+            writeln!(out, "        'SELECT request_hash, state, response_status, response_body, response_headers FROM _axis_idempotency WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3',").unwrap();
+            writeln!(
+                out,
+                "        ['{}', _idempotencyScope, _idempotencyKey],",
+                flow.name
+            )
+            .unwrap();
+            writeln!(out, "      );").unwrap();
+            writeln!(out, "      if (!_stored) throw {{ statusCode: 500, message: 'idempotency conflict row disappeared' }};").unwrap();
+            writeln!(out, "      if (_stored.request_hash !== _requestHash) throw {{ statusCode: 409, message: 'idempotency key was already used with a different request' }};").unwrap();
+            writeln!(out, "      if (_stored.state !== 'completed') throw {{ statusCode: 409, message: 'request with this idempotency key is still processing' }};").unwrap();
+            writeln!(out, "      await _db.query('COMMIT');").unwrap();
+            writeln!(out, "      const _headers = JSON.parse(_stored.response_headers ?? '{{}}') as Record<string, string>;").unwrap();
+            writeln!(out, "      for (const [name, value] of Object.entries(_headers)) res.setHeader(name, value);").unwrap();
+            writeln!(out, "      res.setHeader('Idempotency-Replayed', 'true');").unwrap();
+            writeln!(
+                out,
+                "      const _body = JSON.parse(_stored.response_body ?? 'null');"
+            )
+            .unwrap();
+            writeln!(out, "      return _body === null ? res.sendStatus(Number(_stored.response_status)) : res.status(Number(_stored.response_status)).json(_body);").unwrap();
+            writeln!(out, "    }}").unwrap();
         }
 
-        if let Some(binding) = &route.return_binding {
-            writeln!(out, "    res.status({}).json({});", route.return_code, binding).unwrap();
+        let mut instruction_id = 0usize;
+        for instr in &route.instructions {
+            gen_instruction(&mut out, instr, "    ", &mut instruction_id);
+        }
+
+        let response_body = flow.map(return_body_to_ts).unwrap_or_else(|| {
+            route
+                .return_binding
+                .clone()
+                .unwrap_or_else(|| "null".into())
+        });
+        let response_headers = flow
+            .map(|flow| {
+                flow.return_stmt
+                    .headers
+                    .iter()
+                    .map(|(name, expression)| {
+                        format!(
+                            "{}: String({})",
+                            serde_json::to_string(name).unwrap(),
+                            expr_ir_to_ts(&codegen::lower_expr(expression))
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        writeln!(out, "    const _responseBody = {response_body};").unwrap();
+        writeln!(
+            out,
+            "    const _responseHeaders: Record<string, string> = {{ {} }};",
+            response_headers.join(", ")
+        )
+        .unwrap();
+        writeln!(out, "    for (const [name, value] of Object.entries(_responseHeaders)) res.setHeader(name, value);").unwrap();
+        if let (Some(flow), Some(_)) = (flow, idempotency) {
+            writeln!(out, "    const _completed = await _db.query(").unwrap();
+            writeln!(out, "      \"UPDATE _axis_idempotency SET state = 'completed', response_status = $4, response_body = $5, response_headers = $6, updated_at = $7 WHERE flow_name = $1 AND scope_key = $2 AND idempotency_key = $3 AND state = 'processing'\",").unwrap();
+            writeln!(out, "      ['{}', _idempotencyScope, _idempotencyKey, {}, JSON.stringify(_responseBody), JSON.stringify(_responseHeaders), Math.floor(Date.now() / 1000)],", flow.name, route.return_code).unwrap();
+            writeln!(out, "    );").unwrap();
+            writeln!(out, "    if (_completed.rowCount !== 1) throw {{ statusCode: 500, message: 'idempotency record changed during transaction' }};").unwrap();
+            writeln!(out, "    await _db.query('COMMIT');").unwrap();
+            writeln!(out, "    res.setHeader('Idempotency-Replayed', 'false');").unwrap();
+            if route.return_binding.is_some() {
+                writeln!(
+                    out,
+                    "    return res.status({}).json(_responseBody);",
+                    route.return_code
+                )
+                .unwrap();
+            } else {
+                writeln!(out, "    return res.sendStatus({});", route.return_code).unwrap();
+            }
+        } else if route.return_binding.is_some() {
+            writeln!(
+                out,
+                "    return res.status({}).json(_responseBody);",
+                route.return_code
+            )
+            .unwrap();
         } else {
-            writeln!(out, "    res.sendStatus({});", route.return_code).unwrap();
+            writeln!(out, "    return res.sendStatus({});", route.return_code).unwrap();
         }
 
         writeln!(out, "  }} catch (err: unknown) {{").unwrap();
-        writeln!(out, "    const e = err as {{ statusCode?: number; message?: string }};").unwrap();
-        writeln!(out, "    res.status(e.statusCode ?? 500).json({{ error: e.message ?? \"Internal error\" }});").unwrap();
+        if idempotency.is_some() {
+            writeln!(
+                out,
+                "    await _db.query('ROLLBACK').catch(() => undefined);"
+            )
+            .unwrap();
+        }
+        writeln!(
+            out,
+            "    const e = err as {{ statusCode?: number; message?: string }};"
+        )
+        .unwrap();
+        writeln!(out, "    return res.status(e.statusCode ?? 500).json({{ error: e.message ?? \"Internal error\" }});").unwrap();
+        if idempotency.is_some() {
+            writeln!(out, "  }} finally {{").unwrap();
+            writeln!(out, "    _client.release();").unwrap();
+        }
         writeln!(out, "  }}").unwrap();
         writeln!(out, "}}\n").unwrap();
     }
@@ -390,58 +652,207 @@ fn gen_handlers(program: &Program, codegen: &codegen::CodegenResult) -> String {
     out
 }
 
-fn gen_instruction(out: &mut String, instr: &codegen::Instruction, indent: &str) {
+fn idempotency_path_ts(path: &DotPath) -> String {
+    let Some(root) = path.segments.first() else {
+        return "undefined".into();
+    };
+    match root.as_str() {
+        "header" => path
+            .segments
+            .get(1)
+            .map(|name| format!("req.headers[\"{}\"]", name.replace('_', "-")))
+            .unwrap_or_else(|| "undefined".into()),
+        "auth" => format!("req.auth.{}", path.segments[1..].join(".")),
+        "body" => format!("req.body.{}", path.segments[1..].join(".")),
+        "path" => format!("req.params.{}", path.segments[1..].join(".")),
+        "query" => format!("req.query.{}", path.segments[1..].join(".")),
+        _ => path.as_str(),
+    }
+}
+
+fn return_body_to_ts(flow: &FlowDef) -> String {
+    match &flow.return_stmt.body {
+        Some(ReturnBody::Binding(name)) => name.clone(),
+        Some(ReturnBody::Inline(fields)) => {
+            let fields = fields
+                .iter()
+                .map(|field| {
+                    format!(
+                        "{}: {}",
+                        serde_json::to_string(&field.name).unwrap(),
+                        return_value_to_ts(&field.value)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("{{ {} }}", fields.join(", "))
+        }
+        Some(ReturnBody::Paginated {
+            items,
+            total,
+            cursor,
+            has_more,
+        }) => format!(
+            "{{ items: {}, total: {}, cursor: {}, has_more: {} }}",
+            expr_ir_to_ts(&codegen::lower_expr(items)),
+            expr_ir_to_ts(&codegen::lower_expr(total)),
+            expr_ir_to_ts(&codegen::lower_expr(cursor)),
+            expr_ir_to_ts(&codegen::lower_expr(has_more)),
+        ),
+        None => "null".into(),
+    }
+}
+
+fn return_value_to_ts(value: &ReturnValue) -> String {
+    match value {
+        ReturnValue::Expr(expression) => expr_ir_to_ts(&codegen::lower_expr(expression)),
+        ReturnValue::Nested(fields) => {
+            let fields = fields
+                .iter()
+                .map(|field| {
+                    format!(
+                        "{}: {}",
+                        serde_json::to_string(&field.name).unwrap(),
+                        return_value_to_ts(&field.value)
+                    )
+                })
+                .collect::<Vec<_>>();
+            format!("{{ {} }}", fields.join(", "))
+        }
+    }
+}
+
+fn gen_instruction(
+    out: &mut String,
+    instr: &codegen::Instruction,
+    indent: &str,
+    instruction_id: &mut usize,
+) {
+    let id = *instruction_id;
+    *instruction_id += 1;
     match instr {
         codegen::Instruction::CheckRule { name, checks } => {
             for check in checks {
-                writeln!(out, "{indent}if (!({} {} {})) {{",
-                    expr_ir_to_ts(&codegen::ExprIr::Path { value: check.path.clone() }),
+                writeln!(
+                    out,
+                    "{indent}if (!({} {} {})) {{",
+                    expr_ir_to_ts(&codegen::ExprIr::Path {
+                        value: check.path.clone()
+                    }),
                     rule_op_ts(&check.op),
                     expr_ir_to_ts(&check.value)
-                ).unwrap();
-                writeln!(out, "{indent}  throw {{ statusCode: 422, message: \"Rule {name} failed\" }};").unwrap();
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "{indent}  throw {{ statusCode: 422, message: \"Rule {name} failed\" }};"
+                )
+                .unwrap();
                 writeln!(out, "{indent}}}").unwrap();
             }
         }
-        codegen::Instruction::Guard { name, error_code, error_message, condition } => {
+        codegen::Instruction::Guard {
+            name,
+            error_code,
+            error_message,
+            condition,
+        } => {
             let msg = error_message.as_deref().unwrap_or(name);
-            writeln!(out, "{indent}if (!({cond})) {{", cond = condition_ir_to_ts(condition)).unwrap();
-            writeln!(out, "{indent}  throw {{ statusCode: {error_code}, message: \"{msg}\" }};").unwrap();
+            writeln!(
+                out,
+                "{indent}if (!({cond})) {{",
+                cond = condition_ir_to_ts(condition)
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "{indent}  throw {{ statusCode: {error_code}, message: \"{msg}\" }};"
+            )
+            .unwrap();
             writeln!(out, "{indent}}}").unwrap();
         }
-        codegen::Instruction::FetchOne { binding, source, filters, or_code, or_message } => {
-            let where_parts: Vec<String> = filters.iter().enumerate().map(|(i, f)| {
-                format!("{} {} ${}", f.field, f.op, i + 1)
-            }).collect();
-            let where_clause = if where_parts.is_empty() { String::new() } else {
+        codegen::Instruction::FetchOne {
+            binding,
+            source,
+            filters,
+            or_code,
+            or_message,
+        } => {
+            let where_parts: Vec<String> = filters
+                .iter()
+                .enumerate()
+                .map(|(i, f)| format!("{} {} ${}", f.field, f.op, i + 1))
+                .collect();
+            let where_clause = if where_parts.is_empty() {
+                String::new()
+            } else {
                 format!(" WHERE {}", where_parts.join(" AND "))
             };
-            let filter_vals: Vec<String> = filters.iter().map(|f| expr_ir_to_ts(&f.value)).collect();
-            writeln!(out, "{indent}const {{ rows: {binding}Rows }} = await pool.query(").unwrap();
-            writeln!(out, "{indent}  `SELECT * FROM \"{source}\"{where_clause} LIMIT 1`,").unwrap();
+            let filter_vals: Vec<String> =
+                filters.iter().map(|f| expr_ir_to_ts(&f.value)).collect();
+            writeln!(
+                out,
+                "{indent}const {{ rows: {binding}Rows }} = await _db.query("
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "{indent}  `SELECT * FROM \"{source}\"{where_clause} LIMIT 1`,"
+            )
+            .unwrap();
             if !filter_vals.is_empty() {
                 writeln!(out, "{indent}  [{}]", filter_vals.join(", ")).unwrap();
             }
             writeln!(out, "{indent});").unwrap();
             writeln!(out, "{indent}const {binding} = {binding}Rows[0];").unwrap();
             let msg = or_message.as_deref().unwrap_or("Not found");
-            writeln!(out, "{indent}if (!{binding}) throw {{ statusCode: {or_code}, message: \"{msg}\" }};").unwrap();
+            writeln!(
+                out,
+                "{indent}if (!{binding}) throw {{ statusCode: {or_code}, message: \"{msg}\" }};"
+            )
+            .unwrap();
         }
-        codegen::Instruction::QueryMany { binding, source, filters, sorts, page_size } => {
-            let where_parts: Vec<String> = filters.iter().enumerate().map(|(i, f)| {
-                format!("{} {} ${}", f.field, f.op, i + 1)
-            }).collect();
-            let where_clause = if where_parts.is_empty() { String::new() } else {
+        codegen::Instruction::QueryMany {
+            binding,
+            source,
+            filters,
+            sorts,
+            page_size,
+        } => {
+            let where_parts: Vec<String> = filters
+                .iter()
+                .enumerate()
+                .map(|(i, f)| format!("{} {} ${}", f.field, f.op, i + 1))
+                .collect();
+            let where_clause = if where_parts.is_empty() {
+                String::new()
+            } else {
                 format!(" WHERE {}", where_parts.join(" AND "))
             };
-            let order_clause = if sorts.is_empty() { String::new() } else {
-                let parts: Vec<String> = sorts.iter().map(|s| format!("{} {}", s.field, s.direction)).collect();
+            let order_clause = if sorts.is_empty() {
+                String::new()
+            } else {
+                let parts: Vec<String> = sorts
+                    .iter()
+                    .map(|s| format!("{} {}", s.field, s.direction))
+                    .collect();
                 format!(" ORDER BY {}", parts.join(", "))
             };
-            let limit = page_size.as_ref().map(|ps| format!(" LIMIT {}", expr_ir_to_ts(ps))).unwrap_or_default();
-            let filter_vals: Vec<String> = filters.iter().map(|f| expr_ir_to_ts(&f.value)).collect();
-            writeln!(out, "{indent}const {{ rows: {binding} }} = await pool.query(").unwrap();
-            writeln!(out, "{indent}  `SELECT * FROM \"{source}\"{where_clause}{order_clause}{limit}`,").unwrap();
+            let limit = page_size
+                .as_ref()
+                .map(|ps| format!(" LIMIT {}", expr_ir_to_ts(ps)))
+                .unwrap_or_default();
+            let filter_vals: Vec<String> =
+                filters.iter().map(|f| expr_ir_to_ts(&f.value)).collect();
+            writeln!(
+                out,
+                "{indent}const {{ rows: {binding} }} = await _db.query("
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "{indent}  `SELECT * FROM \"{source}\"{where_clause}{order_clause}{limit}`,"
+            )
+            .unwrap();
             if !filter_vals.is_empty() {
                 writeln!(out, "{indent}  [{}]", filter_vals.join(", ")).unwrap();
             }
@@ -450,60 +861,188 @@ fn gen_instruction(out: &mut String, instr: &codegen::Instruction, indent: &str)
         codegen::Instruction::Compute { binding, expr } => {
             writeln!(out, "{indent}const {binding} = {};", expr_ir_to_ts(expr)).unwrap();
         }
-        codegen::Instruction::Insert { source, fields, binding } => {
+        codegen::Instruction::Insert {
+            source,
+            fields,
+            binding,
+        } => {
             let cols: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
             let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("${i}")).collect();
             let vals: Vec<String> = fields.iter().map(|(_, expr)| expr_ir_to_ts(expr)).collect();
-            let ret = if binding.is_some() { " RETURNING *" } else { "" };
-            writeln!(out, "{indent}const {{ rows: insertRows }} = await pool.query(").unwrap();
-            writeln!(out, "{indent}  `INSERT INTO \"{source}\" ({}) VALUES ({}){ret}`,",
-                cols.join(", "), placeholders.join(", ")).unwrap();
+            let ret = if binding.is_some() {
+                " RETURNING *"
+            } else {
+                ""
+            };
+            writeln!(
+                out,
+                "{indent}const {{ rows: insertRows{id} }} = await _db.query("
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "{indent}  `INSERT INTO \"{source}\" ({}) VALUES ({}){ret}`,",
+                cols.join(", "),
+                placeholders.join(", ")
+            )
+            .unwrap();
             writeln!(out, "{indent}  [{}]", vals.join(", ")).unwrap();
             writeln!(out, "{indent});").unwrap();
             if let Some(b) = binding {
-                writeln!(out, "{indent}const {b} = insertRows[0];").unwrap();
+                writeln!(out, "{indent}const {b} = insertRows{id}[0];").unwrap();
             }
         }
-        codegen::Instruction::Update { source, wheres, sets, binding, or_code } => {
+        codegen::Instruction::Upsert {
+            source,
+            keys,
+            sets,
+            binding,
+            auto_updated_at,
+        } => {
+            let mut fields = keys.clone();
+            fields.extend(sets.clone());
+            let cols: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
+            let placeholders: Vec<String> = (1..=fields.len())
+                .map(|i| format!("{}{}", '$', i))
+                .collect();
+            let values: Vec<String> = fields.iter().map(|(_, expr)| expr_ir_to_ts(expr)).collect();
+            let key_cols = keys
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut updates = sets
+                .iter()
+                .map(|(name, _)| format!("{name} = EXCLUDED.{name}"))
+                .collect::<Vec<_>>();
+            if *auto_updated_at {
+                updates.push("updated_at = NOW()".into());
+            }
+            let updates = updates.join(", ");
+            let returning = if binding.is_some() {
+                " RETURNING *"
+            } else {
+                ""
+            };
+            writeln!(
+                out,
+                "{indent}const {{ rows: upsertRows{id} }} = await _db.query("
+            )
+            .unwrap();
+            writeln!(out, "{indent}  'INSERT INTO \"{source}\" ({}) VALUES ({}) ON CONFLICT ({key_cols}) DO UPDATE SET {updates}{returning}',", cols.join(", "), placeholders.join(", ")).unwrap();
+            writeln!(out, "{indent}  [{}]", values.join(", ")).unwrap();
+            writeln!(out, "{indent});").unwrap();
+            if let Some(name) = binding {
+                writeln!(out, "{indent}const {name} = upsertRows{id}[0];").unwrap();
+            }
+        }
+        codegen::Instruction::Fanout {
+            item,
+            collection,
+            source,
+            fields,
+        } => {
+            let cols = fields
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(
+                out,
+                "{indent}const fanoutSource{id}: unknown = {};",
+                expr_ir_to_ts(collection)
+            )
+            .unwrap();
+            writeln!(out, "{indent}const fanoutItems{id}: unknown[] = Array.isArray(fanoutSource{id}) ? fanoutSource{id} : Array.isArray((fanoutSource{id} as {{ items?: unknown[] }})?.items) ? (fanoutSource{id} as {{ items: unknown[] }}).items : Array.isArray((fanoutSource{id} as {{ data?: unknown[] }})?.data) ? (fanoutSource{id} as {{ data: unknown[] }}).data : [];").unwrap();
+            writeln!(out, "{indent}if (fanoutItems{id}.length * {} > 65535) throw {{ statusCode: 422, message: 'FANOUT exceeds the PostgreSQL parameter limit' }};", fields.len()).unwrap();
+            writeln!(out, "{indent}if (fanoutItems{id}.length > 0) {{").unwrap();
+            writeln!(out, "{indent}  const fanoutValues{id}: unknown[] = [];").unwrap();
+            writeln!(out, "{indent}  const fanoutRows{id} = fanoutItems{id}.map(({item}: unknown, row: number) => {{").unwrap();
+            for (_, expr) in fields {
+                writeln!(
+                    out,
+                    "{indent}    fanoutValues{id}.push({});",
+                    expr_ir_to_ts(expr)
+                )
+                .unwrap();
+            }
+            writeln!(out, "{indent}    return '(' + Array.from({{ length: {} }}, (_, column) => '$' + (row * {} + column + 1)).join(', ') + ')';", fields.len(), fields.len()).unwrap();
+            writeln!(out, "{indent}  }}).join(', ');").unwrap();
+            writeln!(out, "{indent}  await _db.query('INSERT INTO \"{source}\" ({cols}) VALUES ' + fanoutRows{id}, fanoutValues{id});").unwrap();
+            writeln!(out, "{indent}}}").unwrap();
+        }
+        codegen::Instruction::Update {
+            source,
+            wheres,
+            sets,
+            binding,
+            or_code,
+        } => {
             let mut idx = 1;
-            let set_parts: Vec<String> = sets.iter().map(|(name, _)| {
-                let s = format!("{name} = ${idx}");
-                idx += 1;
-                s
-            }).collect();
-            let where_parts: Vec<String> = wheres.iter().map(|w| {
-                let s = format!("{} {} ${idx}", w.field, w.op);
-                idx += 1;
-                s
-            }).collect();
-            let where_clause = if where_parts.is_empty() { String::new() } else {
+            let set_parts: Vec<String> = sets
+                .iter()
+                .map(|(name, _)| {
+                    let s = format!("{name} = ${idx}");
+                    idx += 1;
+                    s
+                })
+                .collect();
+            let where_parts: Vec<String> = wheres
+                .iter()
+                .map(|w| {
+                    let s = format!("{} {} ${idx}", w.field, w.op);
+                    idx += 1;
+                    s
+                })
+                .collect();
+            let where_clause = if where_parts.is_empty() {
+                String::new()
+            } else {
                 format!(" WHERE {}", where_parts.join(" AND "))
             };
             let mut vals: Vec<String> = sets.iter().map(|(_, e)| expr_ir_to_ts(e)).collect();
             vals.extend(wheres.iter().map(|w| expr_ir_to_ts(&w.value)));
-            writeln!(out, "{indent}const {{ rowCount }} = await pool.query(").unwrap();
-            writeln!(out, "{indent}  `UPDATE \"{source}\" SET {}{where_clause}`,", set_parts.join(", ")).unwrap();
+            writeln!(
+                out,
+                "{indent}const {{ rowCount: rowCount{id} }} = await _db.query("
+            )
+            .unwrap();
+            writeln!(
+                out,
+                "{indent}  `UPDATE \"{source}\" SET {}{where_clause}`,",
+                set_parts.join(", ")
+            )
+            .unwrap();
             writeln!(out, "{indent}  [{}]", vals.join(", ")).unwrap();
             writeln!(out, "{indent});").unwrap();
             if *or_code > 0 {
-                writeln!(out, "{indent}if (rowCount === 0) throw {{ statusCode: {or_code}, message: \"Not found\" }};").unwrap();
+                writeln!(out, "{indent}if (rowCount{id} === 0) throw {{ statusCode: {or_code}, message: \"Not found\" }};").unwrap();
             }
             if let Some(b) = binding {
-                writeln!(out, "{indent}const {b} = rowCount;").unwrap();
+                writeln!(out, "{indent}const {b} = rowCount{id};").unwrap();
             }
         }
-        codegen::Instruction::Delete { source, wheres, or_code } => {
+        codegen::Instruction::Delete {
+            source,
+            wheres,
+            or_code,
+        } => {
             let mut idx = 1;
-            let where_parts: Vec<String> = wheres.iter().map(|w| {
-                let s = format!("{} {} ${idx}", w.field, w.op);
-                idx += 1;
-                s
-            }).collect();
-            let where_clause = if where_parts.is_empty() { String::new() } else {
+            let where_parts: Vec<String> = wheres
+                .iter()
+                .map(|w| {
+                    let s = format!("{} {} ${idx}", w.field, w.op);
+                    idx += 1;
+                    s
+                })
+                .collect();
+            let where_clause = if where_parts.is_empty() {
+                String::new()
+            } else {
                 format!(" WHERE {}", where_parts.join(" AND "))
             };
             let vals: Vec<String> = wheres.iter().map(|w| expr_ir_to_ts(&w.value)).collect();
-            writeln!(out, "{indent}await pool.query(").unwrap();
+            writeln!(out, "{indent}await _db.query(").unwrap();
             writeln!(out, "{indent}  `DELETE FROM \"{source}\"{where_clause}`,").unwrap();
             if !vals.is_empty() {
                 writeln!(out, "{indent}  [{}]", vals.join(", ")).unwrap();
@@ -514,21 +1053,42 @@ fn gen_instruction(out: &mut String, instr: &codegen::Instruction, indent: &str)
             }
         }
         codegen::Instruction::EmitEffect { kind, fields } => {
-            let args: Vec<String> = fields.iter().map(|(k, v)| format!("{k}: {}", expr_ir_to_ts(v))).collect();
-            writeln!(out, "{indent}await effects.emit(\"{kind}\", {{ {} }});", args.join(", ")).unwrap();
+            let args: Vec<String> = fields
+                .iter()
+                .map(|(k, v)| format!("{k}: {}", expr_ir_to_ts(v)))
+                .collect();
+            writeln!(
+                out,
+                "{indent}const _effectPayload{id} = {{ kind: \"{kind}\", {} }};",
+                args.join(", ")
+            )
+            .unwrap();
+            writeln!(out, "{indent}await _db.query(").unwrap();
+            writeln!(out, "{indent}  \"INSERT INTO _axis_outbox (kind, payload, status) VALUES ($1, $2, 'pending')\",").unwrap();
+            writeln!(
+                out,
+                "{indent}  [\"{kind}\", JSON.stringify(_effectPayload{id})],"
+            )
+            .unwrap();
+            writeln!(out, "{indent});").unwrap();
         }
         codegen::Instruction::Match { branches, default } => {
             for (i, branch) in branches.iter().enumerate() {
                 let keyword = if i == 0 { "if" } else { "} else if" };
-                writeln!(out, "{indent}{keyword} ({}) {{", condition_ir_to_ts(&branch.condition)).unwrap();
+                writeln!(
+                    out,
+                    "{indent}{keyword} ({}) {{",
+                    condition_ir_to_ts(&branch.condition)
+                )
+                .unwrap();
                 for instr in &branch.instructions {
-                    gen_instruction(out, instr, &format!("{indent}  "));
+                    gen_instruction(out, instr, &format!("{indent}  "), instruction_id);
                 }
             }
             if let Some(default_instrs) = default {
                 writeln!(out, "{indent}}} else {{").unwrap();
                 for instr in default_instrs {
-                    gen_instruction(out, instr, &format!("{indent}  "));
+                    gen_instruction(out, instr, &format!("{indent}  "), instruction_id);
                 }
             }
             writeln!(out, "{indent}}}").unwrap();
@@ -544,7 +1104,12 @@ fn gen_router(program: &Program, codegen: &codegen::CodegenResult) -> String {
 
     let handler_names: Vec<&str> = codegen.routes.iter().map(|r| r.name.as_str()).collect();
     if !handler_names.is_empty() {
-        writeln!(out, "import {{ {} }} from \"./handlers\";", handler_names.join(", ")).unwrap();
+        writeln!(
+            out,
+            "import {{ {} }} from \"./handlers\";",
+            handler_names.join(", ")
+        )
+        .unwrap();
     }
     out.push('\n');
 
@@ -553,8 +1118,12 @@ fn gen_router(program: &Program, codegen: &codegen::CodegenResult) -> String {
 
     for route in &codegen.routes {
         let method = route.method.to_lowercase();
-        writeln!(out, "  router.{method}(\"{}\", (req, res) => {}(req, res, pool));",
-            route.path, route.name).unwrap();
+        writeln!(
+            out,
+            "  router.{method}(\"{}\", (req, res) => {}(req, res, pool));",
+            route.path, route.name
+        )
+        .unwrap();
     }
 
     for c in &program.constructs {
@@ -570,8 +1139,12 @@ fn gen_router(program: &Program, codegen: &codegen::CodegenResult) -> String {
                     HttpMethod::Webhook => "post",
                 };
                 let full_path = format!("{}{}", base, sr.path);
-                writeln!(out, "  router.{method}(\"{full_path}\", (req, res) => {}(req, res, pool));",
-                    sr.target).unwrap();
+                writeln!(
+                    out,
+                    "  router.{method}(\"{full_path}\", (req, res) => {}(req, res, pool));",
+                    sr.target
+                )
+                .unwrap();
             }
         }
     }
@@ -583,8 +1156,12 @@ fn gen_router(program: &Program, codegen: &codegen::CodegenResult) -> String {
                 StreamTransport::Sse => "sse",
             };
             writeln!(out, "  // STREAM {} ({transport})", stream.name).unwrap();
-            writeln!(out, "  router.get(\"{}\", (req, res) => handle_stream_{}(req, res));",
-                stream.path, stream.name).unwrap();
+            writeln!(
+                out,
+                "  router.get(\"{}\", (req, res) => handle_stream_{}(req, res));",
+                stream.path, stream.name
+            )
+            .unwrap();
         }
     }
 
@@ -630,8 +1207,12 @@ fn type_to_zod(ty: &TypeExpr, modifiers: &[Modifier]) -> String {
         }
         TypeExpr::Int { min, max } => {
             let mut s = "z.number().int()".to_string();
-            if let Some(min) = min { write!(s, ".min({min})").unwrap(); }
-            if let Some(max) = max { write!(s, ".max({max})").unwrap(); }
+            if let Some(min) = min {
+                write!(s, ".min({min})").unwrap();
+            }
+            if let Some(max) = max {
+                write!(s, ".max({max})").unwrap();
+            }
             s
         }
         TypeExpr::Decimal { .. } => "z.number()".to_string(),
@@ -689,22 +1270,20 @@ fn expr_ir_to_ts(expr: &codegen::ExprIr) -> String {
             };
             format!("({} {ts_op} {})", expr_ir_to_ts(left), expr_ir_to_ts(right))
         }
-        codegen::ExprIr::UnaryOp { op, operand } => {
-            match op.as_str() {
-                "not" => format!("!({})", expr_ir_to_ts(operand)),
-                "lower" => format!("{}.toLowerCase()", expr_ir_to_ts(operand)),
-                "upper" => format!("{}.toUpperCase()", expr_ir_to_ts(operand)),
-                "trim" => format!("{}.trim()", expr_ir_to_ts(operand)),
-                "length" => format!("{}.length", expr_ir_to_ts(operand)),
-                "abs" => format!("Math.abs({})", expr_ir_to_ts(operand)),
-                "ceil" => format!("Math.ceil({})", expr_ir_to_ts(operand)),
-                "floor" => format!("Math.floor({})", expr_ir_to_ts(operand)),
-                "count" => format!("{}.length", expr_ir_to_ts(operand)),
-                "empty" => format!("({} == null || {0}.length === 0)", expr_ir_to_ts(operand)),
-                "exists" => format!("({} != null)", expr_ir_to_ts(operand)),
-                _ => format!("{op}({})", expr_ir_to_ts(operand)),
-            }
-        }
+        codegen::ExprIr::UnaryOp { op, operand } => match op.as_str() {
+            "not" => format!("!({})", expr_ir_to_ts(operand)),
+            "lower" => format!("{}.toLowerCase()", expr_ir_to_ts(operand)),
+            "upper" => format!("{}.toUpperCase()", expr_ir_to_ts(operand)),
+            "trim" => format!("{}.trim()", expr_ir_to_ts(operand)),
+            "length" => format!("{}.length", expr_ir_to_ts(operand)),
+            "abs" => format!("Math.abs({})", expr_ir_to_ts(operand)),
+            "ceil" => format!("Math.ceil({})", expr_ir_to_ts(operand)),
+            "floor" => format!("Math.floor({})", expr_ir_to_ts(operand)),
+            "count" => format!("{}.length", expr_ir_to_ts(operand)),
+            "empty" => format!("({} == null || {0}.length === 0)", expr_ir_to_ts(operand)),
+            "exists" => format!("({} != null)", expr_ir_to_ts(operand)),
+            _ => format!("{op}({})", expr_ir_to_ts(operand)),
+        },
     }
 }
 
@@ -722,12 +1301,10 @@ fn condition_ir_to_ts(cond: &codegen::ConditionIr) -> String {
             };
             format!("{} {ts_op} {}", expr_ir_to_ts(left), expr_ir_to_ts(right))
         }
-        codegen::ConditionIr::Unary { op, operand } => {
-            match op.as_str() {
-                "not" => format!("!({})", condition_ir_to_ts(operand)),
-                _ => format!("{op}({})", condition_ir_to_ts(operand)),
-            }
-        }
+        codegen::ConditionIr::Unary { op, operand } => match op.as_str() {
+            "not" => format!("!({})", condition_ir_to_ts(operand)),
+            _ => format!("{op}({})", condition_ir_to_ts(operand)),
+        },
         codegen::ConditionIr::Expr(expr) => expr_ir_to_ts(expr),
     }
 }
@@ -817,11 +1394,13 @@ mod tests {
 
     #[test]
     fn test_types_simple_shape() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
   active BOOL DEFAULT TRUE
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.types.contains("export interface User {"));
         assert!(ts.types.contains("id?: string;"));
@@ -831,11 +1410,13 @@ mod tests {
 
     #[test]
     fn test_types_maybe_field() {
-        let program = parse(r#"SHAPE Profile
+        let program = parse(
+            r#"SHAPE Profile
   id UUID PK AUTO
   bio MAYBE TEXT
   age MAYBE INT
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.types.contains("bio?: string;"));
         assert!(ts.types.contains("age?: number;"));
@@ -843,7 +1424,8 @@ mod tests {
 
     #[test]
     fn test_types_body_interface() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -863,7 +1445,8 @@ FLOW create_user post /users
     name body.name
   AS user
   RETURN 201 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.types.contains("export interface UserCreate {"));
         assert!(ts.types.contains("name: string;"));
@@ -871,7 +1454,8 @@ FLOW create_user post /users
 
     #[test]
     fn test_validators_zod_schema() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -893,17 +1477,25 @@ FLOW create_user post /users
     name body.name
   AS user
   RETURN 201 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
-        assert!(ts.validators.contains("export const UserCreateSchema = z.object({"));
+        assert!(
+            ts.validators
+                .contains("export const UserCreateSchema = z.object({")
+        );
         assert!(ts.validators.contains("name: z.string().max(100)"));
         assert!(ts.validators.contains("email: z.string().max(255)"));
-        assert!(ts.validators.contains("age: z.number().int().min(0).max(150).optional()"));
+        assert!(
+            ts.validators
+                .contains("age: z.number().int().min(0).max(150).optional()")
+        );
     }
 
     #[test]
     fn test_validators_enum_type() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   role ENUM admin user guest REQUIRED
 
@@ -923,14 +1515,19 @@ FLOW create_user post /users
     role body.role
   AS user
   RETURN 201 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
-        assert!(ts.validators.contains("z.enum([\"admin\", \"user\", \"guest\"])"));
+        assert!(
+            ts.validators
+                .contains("z.enum([\"admin\", \"user\", \"guest\"])")
+        );
     }
 
     #[test]
     fn test_queries_fetch() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -949,7 +1546,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.queries.contains("export async function get_user_user"));
         assert!(ts.queries.contains("SELECT * FROM \"users\""));
@@ -959,7 +1557,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_queries_insert() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -979,16 +1578,21 @@ FLOW create_user post /users
     name body.name
   AS user
   RETURN 201 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
-        assert!(ts.queries.contains("export async function create_user_insert_users"));
+        assert!(
+            ts.queries
+                .contains("export async function create_user_insert_users")
+        );
         assert!(ts.queries.contains("INSERT INTO \"users\""));
         assert!(ts.queries.contains("RETURNING *"));
     }
 
     #[test]
     fn test_handlers_generated() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1007,16 +1611,23 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
-        assert!(ts.handlers.contains("export async function get_user(req: Request, res: Response, pool: Pool)"));
-        assert!(ts.handlers.contains("res.status(200).json(user)"));
+        assert!(
+            ts.handlers.contains(
+                "export async function get_user(req: Request, res: Response, pool: Pool)"
+            )
+        );
+        assert!(ts.handlers.contains("const _responseBody = user"));
+        assert!(ts.handlers.contains("res.status(200).json(_responseBody)"));
         assert!(ts.handlers.contains("catch"));
     }
 
     #[test]
     fn test_router_generated() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1035,16 +1646,21 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
-        assert!(ts.router.contains("export function createRouter(pool: Pool): Router"));
+        assert!(
+            ts.router
+                .contains("export function createRouter(pool: Pool): Router")
+        );
         assert!(ts.router.contains("router.get(\"/users/:id\""));
         assert!(ts.router.contains("get_user(req, res, pool)"));
     }
 
     #[test]
     fn test_handler_with_guard() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1065,7 +1681,8 @@ FLOW get_user get /users/:id
   GUARD ownership 403 "not yours"
     EQ user.id auth.user_id
   RETURN 200 user
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.handlers.contains("403"));
         assert!(ts.handlers.contains("not yours"));
@@ -1074,8 +1691,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_booking_generates() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
+        )
+        .unwrap();
         let program = parse(&input);
         let ts = generate_typescript(&program);
         assert!(!ts.types.is_empty());
@@ -1087,8 +1705,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_full_generates() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let program = parse(&input);
         let ts = generate_typescript(&program);
         assert!(!ts.types.is_empty());
@@ -1098,7 +1717,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_surface_expose_types() {
-        let program = parse(r#"SHAPE User
+        let program = parse(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
   email STRING 255 REQUIRED
@@ -1110,7 +1730,8 @@ SURFACE public v1
     FIELD id UUID
     FIELD name STRING
     HIDE email
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.types.contains("export interface UserResponse {"));
         assert!(ts.types.contains("id: string;"));
@@ -1119,19 +1740,37 @@ SURFACE public v1
 
     #[test]
     fn test_stream_event_types() {
-        let program = parse(r#"STREAM updates ws /ws/updates
+        let program = parse(
+            r#"STREAM updates ws /ws/updates
   EVENT user_online
     user_id UUID
     name STRING 100
   EVENT message_sent
     from UUID
     body STRING 500
-"#);
+"#,
+        );
         let ts = generate_typescript(&program);
         assert!(ts.types.contains("export interface UserOnlineEvent {"));
         assert!(ts.types.contains("user_id: string;"));
         assert!(ts.types.contains("export interface MessageSentEvent {"));
         assert!(ts.router.contains("STREAM updates (ws)"));
         assert!(ts.router.contains("/ws/updates"));
+    }
+
+    #[test]
+    fn test_messenger_primitives_generate_atomic_typescript() {
+        let program = parse(include_str!("../../examples/messenger-primitives.axis"));
+        let typescript = generate_typescript(&program);
+        let handlers = &typescript.handlers;
+        assert!(handlers.contains("await _db.query('BEGIN')"));
+        assert!(
+            handlers.contains("ON CONFLICT (flow_name, scope_key, idempotency_key) DO NOTHING")
+        );
+        assert!(handlers.contains("ON CONFLICT (id) DO UPDATE SET"));
+        assert!(handlers.contains("FANOUT exceeds the PostgreSQL parameter limit"));
+        assert!(handlers.contains("JSON.stringify(_responseHeaders)"));
+        assert!(handlers.contains("res.setHeader('Idempotency-Replayed', 'false')"));
+        assert!(handlers.contains("await _db.query('COMMIT')"));
     }
 }

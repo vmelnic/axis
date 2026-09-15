@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::ast::*;
 
@@ -27,8 +27,12 @@ impl<'a> OpenApiGen<'a> {
 
         for c in &program.constructs {
             match c {
-                Construct::Shape(s) => { shapes.insert(s.name.clone(), s); }
-                Construct::Source(s) => { sources.insert(s.name.clone(), s); }
+                Construct::Shape(s) => {
+                    shapes.insert(s.name.clone(), s);
+                }
+                Construct::Source(s) => {
+                    sources.insert(s.name.clone(), s);
+                }
                 Construct::Flow(f) => flows.push(f),
                 Construct::Surface(s) => surfaces.push(s),
                 Construct::Stream(s) => streams.push(s),
@@ -36,7 +40,13 @@ impl<'a> OpenApiGen<'a> {
             }
         }
 
-        Self { shapes, sources, flows, surfaces, streams }
+        Self {
+            shapes,
+            sources,
+            flows,
+            surfaces,
+            streams,
+        }
     }
 
     fn generate(&mut self) -> Value {
@@ -79,7 +89,8 @@ impl<'a> OpenApiGen<'a> {
             for flow in &self.flows {
                 let oapi_path = convert_path_params(&flow.path);
                 let method_str = http_method_str(&flow.method).to_lowercase();
-                let operation = self.build_operation(flow, &mut used_schemas, &mut security_schemes);
+                let operation =
+                    self.build_operation(flow, &mut used_schemas, &mut security_schemes);
                 let path_entry = paths.entry(oapi_path).or_insert_with(|| json!({}));
                 path_entry[method_str] = operation;
             }
@@ -91,17 +102,21 @@ impl<'a> OpenApiGen<'a> {
                 StreamTransport::WebSocket => "websocket",
                 StreamTransport::Sse => "text/event-stream",
             };
-            let event_schemas: Vec<Value> = stream.events.iter().map(|evt| {
-                let mut props = Map::new();
-                for f in &evt.fields {
-                    props.insert(f.name.clone(), self.type_to_schema(&f.ty));
-                }
-                json!({
-                    "type": "object",
-                    "properties": Value::Object(props),
-                    "x-event-name": evt.name
+            let event_schemas: Vec<Value> = stream
+                .events
+                .iter()
+                .map(|evt| {
+                    let mut props = Map::new();
+                    for f in &evt.fields {
+                        props.insert(f.name.clone(), self.type_to_schema(&f.ty));
+                    }
+                    json!({
+                        "type": "object",
+                        "properties": Value::Object(props),
+                        "x-event-name": evt.name
+                    })
                 })
-            }).collect();
+                .collect();
 
             let operation = json!({
                 "operationId": format!("stream_{}", stream.name),
@@ -182,7 +197,10 @@ impl<'a> OpenApiGen<'a> {
 
         for param in &flow.params {
             let schema = self.type_to_schema(&param.ty);
-            let required = param.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+            let required = param
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Required));
             let mut p = json!({
                 "name": param.name,
                 "in": "query",
@@ -201,7 +219,10 @@ impl<'a> OpenApiGen<'a> {
 
         for header in &flow.headers {
             let schema = self.type_to_schema(&header.ty);
-            let required = header.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+            let required = header
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Required));
             let mut h = json!({
                 "name": header.name,
                 "in": "header",
@@ -237,6 +258,14 @@ impl<'a> OpenApiGen<'a> {
 
         let success_code = flow.return_stmt.code.to_string();
         let mut success_response = json!({ "description": "Success" });
+        if flow.idempotency.is_some() {
+            success_response["headers"] = json!({
+                "Idempotency-Replayed": {
+                    "schema": { "type": "boolean" },
+                    "description": "True when Axis replayed the committed response"
+                }
+            });
+        }
 
         if let Some(body) = &flow.return_stmt.body {
             match body {
@@ -284,7 +313,12 @@ impl<'a> OpenApiGen<'a> {
                     error_codes.entry(code).or_insert_with(|| msg.to_string());
                 }
                 FlowStep::Let(l) => {
-                    if let Expr::Fetch { or_code, or_message, .. } = &l.expr {
+                    if let Expr::Fetch {
+                        or_code,
+                        or_message,
+                        ..
+                    } = &l.expr
+                    {
                         if *or_code > 0 {
                             let code = or_code.to_string();
                             let msg = or_message.as_deref().unwrap_or("Not found");
@@ -296,32 +330,56 @@ impl<'a> OpenApiGen<'a> {
             }
         }
         for (code, msg) in &error_codes {
-            responses.insert(code.clone(), json!({
-                "description": msg,
-                "content": {
-                    "application/json": {
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "error": { "type": "string" },
-                                "code": { "type": "integer" }
+            responses.insert(
+                code.clone(),
+                json!({
+                    "description": msg,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "error": { "type": "string" },
+                                    "code": { "type": "integer" }
+                                }
                             }
                         }
                     }
-                }
-            }));
+                }),
+            );
         }
 
         if !flow.limits.is_empty() {
-            responses.insert("429".into(), json!({
-                "description": "Rate limit exceeded",
-                "headers": {
-                    "Retry-After": {
-                        "schema": { "type": "integer" },
-                        "description": "Seconds until rate limit resets"
+            responses.insert(
+                "429".into(),
+                json!({
+                    "description": "Rate limit exceeded",
+                    "headers": {
+                        "Retry-After": {
+                            "schema": { "type": "integer" },
+                            "description": "Seconds until rate limit resets"
+                        }
                     }
-                }
-            }));
+                }),
+            );
+        }
+
+        if flow.idempotency.is_some() {
+            responses.entry("409").or_insert_with(|| {
+                json!({
+                    "description": "Idempotency key conflict or request still processing",
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "error": { "type": "string" }
+                                }
+                            }
+                        }
+                    }
+                })
+            });
         }
 
         op["responses"] = Value::Object(responses);
@@ -340,6 +398,15 @@ impl<'a> OpenApiGen<'a> {
             op["x-cache"] = json!({
                 "ttl": cache.ttl,
                 "vary": cache.vary.iter().map(|v| v.as_str()).collect::<Vec<_>>()
+            });
+        }
+
+        if let Some(idempotency) = &flow.idempotency {
+            op["x-axis-idempotency"] = json!({
+                "key": idempotency.key.as_str(),
+                "scope": idempotency.scope.as_str(),
+                "ttl_seconds": idempotency.ttl,
+                "atomic": true
             });
         }
 
@@ -398,7 +465,11 @@ impl<'a> OpenApiGen<'a> {
         for field in &body.fields {
             let schema = self.type_to_schema(&field.ty);
             properties.insert(field.name.clone(), schema);
-            if field.modifiers.iter().any(|m| matches!(m, Modifier::Required)) {
+            if field
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Required))
+            {
                 required.push(json!(field.name));
             }
         }
@@ -470,13 +541,20 @@ impl<'a> OpenApiGen<'a> {
             match step {
                 FlowStep::Let(l) if l.name == binding => {
                     return match &l.expr {
-                        Expr::Fetch { source, .. } => {
-                            self.source_shape_schema(source)
-                        }
+                        Expr::Fetch { source, .. } => self.source_shape_schema(source),
                         Expr::Query { source, .. } => {
                             json!({
-                                "type": "array",
-                                "items": self.source_shape_schema(source)
+                                "type": "object",
+                                "properties": {
+                                    "items": {
+                                        "type": "array",
+                                        "items": self.source_shape_schema(source)
+                                    },
+                                    "total": { "type": "integer" },
+                                    "page": { "type": "integer" },
+                                    "page_size": { "type": "integer" }
+                                },
+                                "required": ["items", "total", "page", "page_size"]
                             })
                         }
                         _ => json!({ "type": "object" }),
@@ -500,8 +578,7 @@ impl<'a> OpenApiGen<'a> {
     }
 
     fn source_shape_schema(&self, source_name: &str) -> Value {
-        let shape_name = self.sources.get(source_name)
-            .map(|s| s.shape.as_str());
+        let shape_name = self.sources.get(source_name).map(|s| s.shape.as_str());
 
         if let Some(shape_name) = shape_name {
             if let Some(shape) = self.shapes.get(shape_name) {
@@ -519,7 +596,10 @@ impl<'a> OpenApiGen<'a> {
             let is_maybe = matches!(&field.ty, TypeExpr::Maybe(_));
             let schema = self.type_to_schema(&field.ty);
             properties.insert(field.name.clone(), schema);
-            let is_required = field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+            let is_required = field
+                .modifiers
+                .iter()
+                .any(|m| matches!(m, Modifier::Required));
             let is_pk = field.modifiers.iter().any(|m| matches!(m, Modifier::Pk));
             if (is_required || is_pk) && !is_maybe {
                 required.push(json!(field.name));
@@ -547,8 +627,12 @@ impl<'a> OpenApiGen<'a> {
             TypeExpr::String(None) => json!({ "type": "string" }),
             TypeExpr::Int { min, max } => {
                 let mut s = json!({ "type": "integer" });
-                if let Some(v) = min { s["minimum"] = json!(v); }
-                if let Some(v) = max { s["maximum"] = json!(v); }
+                if let Some(v) = min {
+                    s["minimum"] = json!(v);
+                }
+                if let Some(v) = max {
+                    s["maximum"] = json!(v);
+                }
                 s
             }
             TypeExpr::Decimal { .. } => json!({ "type": "number" }),
@@ -634,7 +718,11 @@ fn literal_to_json(val: &LiteralValue) -> Value {
     match val {
         LiteralValue::Int(n) => json!(n),
         LiteralValue::Decimal(d) => {
-            if let Ok(f) = d.parse::<f64>() { json!(f) } else { json!(d) }
+            if let Ok(f) = d.parse::<f64>() {
+                json!(f)
+            } else {
+                json!(d)
+            }
         }
         LiteralValue::String(s) => json!(s),
         LiteralValue::Bool(b) => json!(b),
@@ -660,7 +748,8 @@ mod tests {
 
     #[test]
     fn test_basic_openapi() {
-        let spec = gen_openapi(r#"SHAPE User
+        let spec = gen_openapi(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -679,7 +768,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         assert_eq!(spec["openapi"], "3.1.0");
         assert_eq!(spec["info"]["title"], "API");
         let paths = spec["paths"].as_object().unwrap();
@@ -693,7 +783,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_openapi_with_surface() {
-        let spec = gen_openapi(r#"SHAPE User
+        let spec = gen_openapi(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
   email STRING 255 REQUIRED
@@ -722,7 +813,8 @@ SURFACE public v2
     FIELD id UUID
     FIELD name STRING
     HIDE email
-"#);
+"#,
+        );
         assert_eq!(spec["info"]["title"], "public");
         assert_eq!(spec["info"]["version"], "v2");
         let paths = spec["paths"].as_object().unwrap();
@@ -737,7 +829,8 @@ SURFACE public v2
 
     #[test]
     fn test_openapi_request_body() {
-        let spec = gen_openapi(r#"SHAPE Order
+        let spec = gen_openapi(
+            r#"SHAPE Order
   id UUID PK AUTO
   user_id UUID REQUIRED
   quantity INT MIN 1 MAX 100 REQUIRED
@@ -762,10 +855,13 @@ FLOW create_order post /orders
     quantity body.quantity
   AS order
   RETURN 201 order
-"#);
+"#,
+        );
         let post = &spec["paths"]["/orders"]["post"];
         assert!(post["requestBody"].is_object());
-        let ref_path = post["requestBody"]["content"]["application/json"]["schema"]["$ref"].as_str().unwrap();
+        let ref_path = post["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+            .as_str()
+            .unwrap();
         assert_eq!(ref_path, "#/components/schemas/OrderCreate");
 
         let schema = &spec["components"]["schemas"]["OrderCreate"];
@@ -785,7 +881,8 @@ FLOW create_order post /orders
 
     #[test]
     fn test_openapi_query_params() {
-        let spec = gen_openapi(r#"SHAPE Order
+        let spec = gen_openapi(
+            r#"SHAPE Order
   id UUID PK AUTO
   status ENUM pending confirmed REQUIRED
 
@@ -805,7 +902,8 @@ FLOW list_orders get /orders
     QUERY orders
       FILTER id EQ auth.user_id
   RETURN 200 orders
-"#);
+"#,
+        );
         let get = &spec["paths"]["/orders"]["get"];
         let params = get["parameters"].as_array().unwrap();
         let page_size = params.iter().find(|p| p["name"] == "page_size").unwrap();
@@ -816,7 +914,8 @@ FLOW list_orders get /orders
 
     #[test]
     fn test_openapi_guard_errors() {
-        let spec = gen_openapi(r#"SHAPE Booking
+        let spec = gen_openapi(
+            r#"SHAPE Booking
   id UUID PK AUTO
   user_id UUID REQUIRED
   check_in DATE REQUIRED
@@ -839,7 +938,8 @@ FLOW get_booking get /bookings/:id
   GUARD ownership 403 "not your booking"
     EQ booking.user_id auth.user_id
   RETURN 200 booking
-"#);
+"#,
+        );
         let get = &spec["paths"]["/bookings/{id}"]["get"];
         let responses = get["responses"].as_object().unwrap();
         assert!(responses.contains_key("200"));
@@ -850,7 +950,8 @@ FLOW get_booking get /bookings/:id
 
     #[test]
     fn test_openapi_response_schema() {
-        let spec = gen_openapi(r#"SHAPE User
+        let spec = gen_openapi(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
   email STRING 255 REQUIRED UNIQUE
@@ -870,7 +971,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let get = &spec["paths"]["/users/{id}"]["get"];
         let schema = &get["responses"]["200"]["content"]["application/json"]["schema"];
         assert_eq!(schema["type"], "object");
@@ -884,7 +986,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_openapi_list_response() {
-        let spec = gen_openapi(r#"SHAPE Order
+        let spec = gen_openapi(
+            r#"SHAPE Order
   id UUID PK AUTO
   status ENUM pending confirmed REQUIRED
 
@@ -902,16 +1005,21 @@ FLOW list_orders get /orders
     QUERY orders
       FILTER id EQ auth.user_id
   RETURN 200 orders
-"#);
+"#,
+        );
         let get = &spec["paths"]["/orders"]["get"];
         let schema = &get["responses"]["200"]["content"]["application/json"]["schema"];
-        assert_eq!(schema["type"], "array");
-        assert!(schema["items"]["properties"].is_object());
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["items"]["items"]["properties"].is_object());
+        assert_eq!(schema["properties"]["total"]["type"], "integer");
+        assert_eq!(schema["properties"]["page"]["type"], "integer");
+        assert_eq!(schema["properties"]["page_size"]["type"], "integer");
     }
 
     #[test]
     fn test_openapi_cache_extension() {
-        let spec = gen_openapi(r#"SHAPE User
+        let spec = gen_openapi(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -931,7 +1039,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         let get = &spec["paths"]["/users/{id}"]["get"];
         assert_eq!(get["x-cache"]["ttl"], 60);
         let vary = get["x-cache"]["vary"].as_array().unwrap();
@@ -941,8 +1050,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_openapi_booking_full() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
+        )
+        .unwrap();
         let spec = gen_openapi(&input);
         assert_eq!(spec["openapi"], "3.1.0");
         let paths = spec["paths"].as_object().unwrap();
@@ -955,8 +1065,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_openapi_full_example() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let spec = gen_openapi(&input);
         let paths = spec["paths"].as_object().unwrap();
         assert_eq!(paths.len(), 3); // /api/v1/orders, /api/v1/orders/:id, /ws/orders
@@ -972,7 +1083,8 @@ FLOW get_user get /users/:id
 
     #[test]
     fn test_openapi_deprecation() {
-        let spec = gen_openapi(r#"SHAPE Item
+        let spec = gen_openapi(
+            r#"SHAPE Item
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -994,14 +1106,16 @@ SURFACE shop v2
     FIELD id UUID
     FIELD name STRING
   DEPRECATE v1 SUNSET "2027-06-01"
-"#);
+"#,
+        );
         assert_eq!(spec["x-deprecation"]["replaces"], "v1");
         assert_eq!(spec["x-deprecation"]["sunset"], "2027-06-01");
     }
 
     #[test]
     fn test_openapi_rename_fields() {
-        let spec = gen_openapi(r#"SHAPE Booking
+        let spec = gen_openapi(
+            r#"SHAPE Booking
   id UUID PK AUTO
   note STRING 500 REQUIRED
 
@@ -1023,15 +1137,19 @@ SURFACE public v1
     FIELD id UUID
     FIELD note STRING
     RENAME note AS special_requests
-"#);
-        let props = spec["components"]["schemas"]["BookingResponse"]["properties"].as_object().unwrap();
+"#,
+        );
+        let props = spec["components"]["schemas"]["BookingResponse"]["properties"]
+            .as_object()
+            .unwrap();
         assert!(props.contains_key("special_requests"));
         assert!(!props.contains_key("note"));
     }
 
     #[test]
     fn test_openapi_maybe_nullable() {
-        let spec = gen_openapi(r#"SHAPE Item
+        let spec = gen_openapi(
+            r#"SHAPE Item
   id UUID PK AUTO
   name STRING 100 REQUIRED
   description MAYBE TEXT
@@ -1047,15 +1165,18 @@ FLOW get_item get /items/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 item
-"#);
-        let schema = &spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+"#,
+        );
+        let schema = &spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"]["application/json"]
+            ["schema"];
         let desc = &schema["properties"]["description"];
         assert_eq!(desc["nullable"], true);
     }
 
     #[test]
     fn test_openapi_stream() {
-        let spec = gen_openapi(r#"SHAPE User
+        let spec = gen_openapi(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1064,7 +1185,8 @@ STREAM notifications ws /ws/notifications
   EVENT user_joined
     user_id UUID
     name STRING 100
-"#);
+"#,
+        );
         let paths = spec["paths"].as_object().unwrap();
         assert!(paths.contains_key("/ws/notifications"));
         let get = &paths["/ws/notifications"]["get"];
@@ -1073,5 +1195,15 @@ STREAM notifications ws /ws/notifications
         let events = get["x-events"].as_array().unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["x-event-name"], "user_joined");
+    }
+
+    #[test]
+    fn test_openapi_describes_atomic_idempotency() {
+        let spec = gen_openapi(include_str!("../../examples/messenger-primitives.axis"));
+        let operation = &spec["paths"]["/messages/{id}/deliver"]["post"];
+        assert_eq!(operation["x-axis-idempotency"]["atomic"], true);
+        assert_eq!(operation["x-axis-idempotency"]["ttl_seconds"], 86400);
+        assert!(operation["responses"]["201"]["headers"]["Idempotency-Replayed"].is_object());
+        assert!(operation["responses"]["409"].is_object());
     }
 }

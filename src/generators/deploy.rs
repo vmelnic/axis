@@ -116,7 +116,8 @@ COPY --from=builder /app/target/release/axis-server /usr/local/bin/axis-server
 WORKDIR /app
 EXPOSE 8080
 CMD ["axis-server"]
-"#.into()
+"#
+    .into()
 }
 
 fn generate_compose(infra: &InfraRequirements) -> String {
@@ -128,7 +129,11 @@ fn generate_compose(infra: &InfraRequirements) -> String {
     writeln!(out, "      - \"{}:{}\"", infra.port, infra.port).unwrap();
     writeln!(out, "    environment:").unwrap();
     writeln!(out, "      - PORT={}", infra.port).unwrap();
-    writeln!(out, "      - JWT_SECRET=${{JWT_SECRET:-change-me-in-production}}").unwrap();
+    writeln!(
+        out,
+        "      - JWT_SECRET=${{JWT_SECRET:-change-me-in-production}}"
+    )
+    .unwrap();
     writeln!(out, "      - RUN_MIGRATIONS=1").unwrap();
 
     let mut depends = Vec::new();
@@ -136,7 +141,11 @@ fn generate_compose(infra: &InfraRequirements) -> String {
     for db in &infra.databases {
         match db.engine.as_str() {
             "postgres" => {
-                writeln!(out, "      - DATABASE_URL=postgres://axis:axis@postgres:5432/axis").unwrap();
+                writeln!(
+                    out,
+                    "      - DATABASE_URL=postgres://axis:axis@postgres:5432/axis"
+                )
+                .unwrap();
                 depends.push("postgres");
             }
             "redis" => {
@@ -144,7 +153,11 @@ fn generate_compose(infra: &InfraRequirements) -> String {
                 depends.push("redis");
             }
             "mysql" => {
-                writeln!(out, "      - DATABASE_URL=mysql://axis:axis@mysql:3306/axis").unwrap();
+                writeln!(
+                    out,
+                    "      - DATABASE_URL=mysql://axis:axis@mysql:3306/axis"
+                )
+                .unwrap();
                 depends.push("mysql");
             }
             "elasticsearch" => {
@@ -319,7 +332,9 @@ fn generate_env(infra: &InfraRequirements) -> String {
 
     for db in &infra.databases {
         match db.engine.as_str() {
-            "postgres" => writeln!(out, "DATABASE_URL=postgres://axis:axis@localhost:5432/axis").unwrap(),
+            "postgres" => {
+                writeln!(out, "DATABASE_URL=postgres://axis:axis@localhost:5432/axis").unwrap()
+            }
             "redis" => writeln!(out, "REDIS_URL=redis://localhost:6379").unwrap(),
             "mysql" => writeln!(out, "DATABASE_URL=mysql://axis:axis@localhost:3306/axis").unwrap(),
             "elasticsearch" => writeln!(out, "ELASTICSEARCH_URL=http://localhost:9200").unwrap(),
@@ -442,8 +457,9 @@ STREAM updates ws /ws/updates
     #[test]
     fn test_deploy_full_example() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let program = compile_source(&input).unwrap();
         let deploy = generate_deploy(&program);
 

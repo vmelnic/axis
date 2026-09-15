@@ -68,9 +68,7 @@ struct Linker {
 
 impl Linker {
     fn new() -> Self {
-        Self {
-            errors: Vec::new(),
-        }
+        Self { errors: Vec::new() }
     }
 
     fn link(&mut self, program: &Program) -> LinkResult {
@@ -82,20 +80,38 @@ impl Linker {
 
         for construct in &program.constructs {
             match construct {
-                Construct::Shape(s) => { shape_names.insert(s.name.clone()); }
-                Construct::Source(s) => { source_names.insert(s.name.clone()); }
-                Construct::Realm(r) => { realm_names.insert(r.name.clone()); }
+                Construct::Shape(s) => {
+                    shape_names.insert(s.name.clone());
+                }
+                Construct::Source(s) => {
+                    source_names.insert(s.name.clone());
+                }
+                Construct::Realm(r) => {
+                    realm_names.insert(r.name.clone());
+                }
                 Construct::Service(s) => {
-                    let methods: HashSet<String> = s.methods.iter().map(|m| m.name.clone()).collect();
+                    let methods: HashSet<String> =
+                        s.methods.iter().map(|m| m.name.clone()).collect();
                     service_names.insert(s.name.clone(), methods);
                 }
-                Construct::Flow(f) => { flow_names.insert(f.name.clone()); }
-                Construct::Saga(s) => { flow_names.insert(s.name.clone()); }
+                Construct::Flow(f) => {
+                    flow_names.insert(f.name.clone());
+                }
+                Construct::Saga(s) => {
+                    flow_names.insert(s.name.clone());
+                }
                 _ => {}
             }
         }
 
-        self.resolve_references(program, &shape_names, &source_names, &realm_names, &service_names, &flow_names);
+        self.resolve_references(
+            program,
+            &shape_names,
+            &source_names,
+            &realm_names,
+            &service_names,
+            &flow_names,
+        );
         self.detect_structural_cycles(program, &shape_names);
 
         let formatted = fmt::format_program(program);
@@ -114,30 +130,55 @@ impl Linker {
         for construct in &program.constructs {
             match construct {
                 Construct::Shape(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("SHAPE {}", s.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("SHAPE {}", s.name));
                     let hash = content_hash(&fragment);
                     let deps = self.shape_deps(s);
-                    shape_entries.push(HashedEntry { name: s.name.clone(), hash, deps });
+                    shape_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps,
+                    });
                 }
                 Construct::Source(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("SOURCE {}", s.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("SOURCE {}", s.name));
                     let hash = content_hash(&fragment);
-                    source_entries.push(HashedEntry { name: s.name.clone(), hash, deps: vec![s.shape.clone()] });
+                    source_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps: vec![s.shape.clone()],
+                    });
                 }
                 Construct::Realm(r) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("REALM {}", r.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("REALM {}", r.name));
                     let hash = content_hash(&fragment);
-                    realm_entries.push(HashedEntry { name: r.name.clone(), hash, deps: vec![] });
+                    realm_entries.push(HashedEntry {
+                        name: r.name.clone(),
+                        hash,
+                        deps: vec![],
+                    });
                 }
                 Construct::Policy(p) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("POLICY {}", p.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("POLICY {}", p.name));
                     let hash = content_hash(&fragment);
-                    policy_entries.push(HashedEntry { name: p.name.clone(), hash, deps: vec![] });
+                    policy_entries.push(HashedEntry {
+                        name: p.name.clone(),
+                        hash,
+                        deps: vec![],
+                    });
                 }
                 Construct::Service(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("SERVICE {}", s.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("SERVICE {}", s.name));
                     let hash = content_hash(&fragment);
-                    service_entries.push(HashedEntry { name: s.name.clone(), hash, deps: vec![] });
+                    service_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps: vec![],
+                    });
                 }
                 Construct::Flow(f) => {
                     let method = match f.method {
@@ -148,10 +189,15 @@ impl Linker {
                         HttpMethod::Delete => "delete",
                         HttpMethod::Webhook => "webhook",
                     };
-                    let fragment = self.extract_construct_text(&formatted, &format!("FLOW {} {}", f.name, method));
+                    let fragment = self
+                        .extract_construct_text(&formatted, &format!("FLOW {} {}", f.name, method));
                     let hash = content_hash(&fragment);
                     let deps = self.flow_deps(f);
-                    flow_entries.push(HashedEntry { name: f.name.clone(), hash, deps });
+                    flow_entries.push(HashedEntry {
+                        name: f.name.clone(),
+                        hash,
+                        deps,
+                    });
                 }
                 Construct::Saga(s) => {
                     let method = match s.method {
@@ -162,18 +208,33 @@ impl Linker {
                         HttpMethod::Delete => "DELETE",
                         HttpMethod::Webhook => "WEBHOOK",
                     };
-                    let fragment = self.extract_construct_text(&formatted, &format!("SAGA {} {}", s.name, method));
+                    let fragment = self
+                        .extract_construct_text(&formatted, &format!("SAGA {} {}", s.name, method));
                     let hash = content_hash(&fragment);
-                    saga_entries.push(HashedEntry { name: s.name.clone(), hash, deps: vec![] });
+                    saga_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps: vec![],
+                    });
                 }
                 Construct::Surface(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("SURFACE {} {}", s.name, s.version));
+                    let fragment = self.extract_construct_text(
+                        &formatted,
+                        &format!("SURFACE {} {}", s.name, s.version),
+                    );
                     let hash = content_hash(&fragment);
                     let deps: Vec<String> = s.routes.iter().map(|r| r.target.clone()).collect();
-                    surface_entries.push(HashedEntry { name: format!("{}/{}", s.name, s.version), hash, deps });
+                    surface_entries.push(HashedEntry {
+                        name: format!("{}/{}", s.name, s.version),
+                        hash,
+                        deps,
+                    });
                 }
                 Construct::Migrate(m) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("MIGRATE {} {} TO {}", m.shape, m.from_version, m.to_version));
+                    let fragment = self.extract_construct_text(
+                        &formatted,
+                        &format!("MIGRATE {} {} TO {}", m.shape, m.from_version, m.to_version),
+                    );
                     let hash = content_hash(&fragment);
                     migration_entries.push(HashedEntry {
                         name: format!("{} {} -> {}", m.shape, m.from_version, m.to_version),
@@ -182,32 +243,48 @@ impl Linker {
                     });
                 }
                 Construct::Stream(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("STREAM {}", s.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("STREAM {}", s.name));
                     let hash = content_hash(&fragment);
                     let mut deps = Vec::new();
                     if let Some(ref realm) = s.realm {
                         deps.push(realm.clone());
                     }
-                    stream_entries.push(HashedEntry { name: s.name.clone(), hash, deps });
+                    stream_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps,
+                    });
                 }
                 Construct::Func(f) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("FUNC {}", f.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("FUNC {}", f.name));
                     let hash = content_hash(&fragment);
                     let mut deps = HashSet::new();
                     self.collect_step_source_deps(&f.steps, &mut deps);
                     self.collect_expr_source_deps(&f.return_expr, &mut deps);
-                    flow_entries.push(HashedEntry { name: f.name.clone(), hash, deps: deps.into_iter().collect() });
+                    flow_entries.push(HashedEntry {
+                        name: f.name.clone(),
+                        hash,
+                        deps: deps.into_iter().collect(),
+                    });
                 }
                 Construct::Storage(s) => {
-                    let fragment = self.extract_construct_text(&formatted, &format!("STORAGE {}", s.name));
+                    let fragment =
+                        self.extract_construct_text(&formatted, &format!("STORAGE {}", s.name));
                     let hash = content_hash(&fragment);
-                    storage_entries.push(HashedEntry { name: s.name.clone(), hash, deps: vec![] });
+                    storage_entries.push(HashedEntry {
+                        name: s.name.clone(),
+                        hash,
+                        deps: vec![],
+                    });
                 }
             }
         }
 
         let mut manifest_content = String::new();
-        for e in shape_entries.iter()
+        for e in shape_entries
+            .iter()
             .chain(source_entries.iter())
             .chain(realm_entries.iter())
             .chain(policy_entries.iter())
@@ -258,7 +335,10 @@ impl Linker {
                     if !shapes.contains(&s.shape) {
                         self.errors.push(LinkError {
                             kind: LinkErrorKind::UndefinedReference,
-                            message: format!("SOURCE '{}' references undefined SHAPE '{}'", s.name, s.shape),
+                            message: format!(
+                                "SOURCE '{}' references undefined SHAPE '{}'",
+                                s.name, s.shape
+                            ),
                         });
                     }
                 }
@@ -267,7 +347,10 @@ impl Linker {
                         if !realms.contains(realm) {
                             self.errors.push(LinkError {
                                 kind: LinkErrorKind::UndefinedReference,
-                                message: format!("FLOW '{}' references undefined REALM '{realm}'", f.name),
+                                message: format!(
+                                    "FLOW '{}' references undefined REALM '{realm}'",
+                                    f.name
+                                ),
                             });
                         }
                     }
@@ -278,7 +361,10 @@ impl Linker {
                         if !realms.contains(realm) {
                             self.errors.push(LinkError {
                                 kind: LinkErrorKind::UndefinedReference,
-                                message: format!("SAGA '{}' references undefined REALM '{realm}'", s.name),
+                                message: format!(
+                                    "SAGA '{}' references undefined REALM '{realm}'",
+                                    s.name
+                                ),
                             });
                         }
                     }
@@ -296,7 +382,8 @@ impl Linker {
                                 kind: LinkErrorKind::UndefinedReference,
                                 message: format!(
                                     "SURFACE '{}/{}' route {} {} -> '{}' references undefined FLOW",
-                                    s.name, s.version,
+                                    s.name,
+                                    s.version,
                                     format!("{:?}", route.method).to_uppercase(),
                                     route.path,
                                     route.target
@@ -372,7 +459,21 @@ impl Linker {
                     if !sources.contains(&i.source) {
                         self.errors.push(LinkError {
                             kind: LinkErrorKind::UndefinedReference,
-                            message: format!("'{owner}' INSERT references undefined SOURCE '{}'", i.source),
+                            message: format!(
+                                "'{owner}' INSERT references undefined SOURCE '{}'",
+                                i.source
+                            ),
+                        });
+                    }
+                }
+                FlowStep::Upsert(u) => {
+                    if !sources.contains(&u.source) {
+                        self.errors.push(LinkError {
+                            kind: LinkErrorKind::UndefinedReference,
+                            message: format!(
+                                "'{owner}' UPSERT references undefined SOURCE '{}'",
+                                u.source
+                            ),
                         });
                     }
                 }
@@ -380,7 +481,10 @@ impl Linker {
                     if !sources.contains(&u.source) {
                         self.errors.push(LinkError {
                             kind: LinkErrorKind::UndefinedReference,
-                            message: format!("'{owner}' UPDATE references undefined SOURCE '{}'", u.source),
+                            message: format!(
+                                "'{owner}' UPDATE references undefined SOURCE '{}'",
+                                u.source
+                            ),
                         });
                     }
                 }
@@ -388,7 +492,10 @@ impl Linker {
                     if !sources.contains(&d.source) {
                         self.errors.push(LinkError {
                             kind: LinkErrorKind::UndefinedReference,
-                            message: format!("'{owner}' DELETE references undefined SOURCE '{}'", d.source),
+                            message: format!(
+                                "'{owner}' DELETE references undefined SOURCE '{}'",
+                                d.source
+                            ),
                         });
                     }
                 }
@@ -404,6 +511,18 @@ impl Linker {
                 FlowStep::Each(e) => {
                     self.resolve_expr_refs(owner, &e.source, sources, services);
                     self.resolve_step_refs(owner, &e.steps, sources, services);
+                }
+                FlowStep::Fanout(f) => {
+                    self.resolve_expr_refs(owner, &f.source, sources, services);
+                    if !sources.contains(&f.insert.source) {
+                        self.errors.push(LinkError {
+                            kind: LinkErrorKind::UndefinedReference,
+                            message: format!(
+                                "'{owner}' FANOUT references undefined SOURCE '{}'",
+                                f.insert.source
+                            ),
+                        });
+                    }
                 }
                 FlowStep::Try(t) => {
                     self.resolve_step_refs(owner, &t.body, sources, services);
@@ -430,25 +549,29 @@ impl Linker {
                     });
                 }
             }
-            Expr::Call { service, method, .. } => {
-                match services.get(service) {
-                    None => {
+            Expr::Call {
+                service, method, ..
+            } => match services.get(service) {
+                None => {
+                    self.errors.push(LinkError {
+                        kind: LinkErrorKind::UndefinedReference,
+                        message: format!("'{owner}' CALL references undefined SERVICE '{service}'"),
+                    });
+                }
+                Some(methods) => {
+                    if !methods.contains(method) {
                         self.errors.push(LinkError {
                             kind: LinkErrorKind::UndefinedReference,
-                            message: format!("'{owner}' CALL references undefined SERVICE '{service}'"),
+                            message: format!(
+                                "'{owner}' CALL references undefined METHOD '{service}.{method}'"
+                            ),
                         });
                     }
-                    Some(methods) => {
-                        if !methods.contains(method) {
-                            self.errors.push(LinkError {
-                                kind: LinkErrorKind::UndefinedReference,
-                                message: format!("'{owner}' CALL references undefined METHOD '{service}.{method}'"),
-                            });
-                        }
-                    }
                 }
+            },
+            Expr::Unary { operand, .. } => {
+                self.resolve_expr_refs(owner, operand, sources, services)
             }
-            Expr::Unary { operand, .. } => self.resolve_expr_refs(owner, operand, sources, services),
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr_refs(owner, left, sources, services);
                 self.resolve_expr_refs(owner, right, sources, services);
@@ -458,7 +581,9 @@ impl Linker {
                 self.resolve_expr_refs(owner, b, sources, services);
                 self.resolve_expr_refs(owner, c, sources, services);
             }
-            Expr::If { cond, then, else_, .. } => {
+            Expr::If {
+                cond, then, else_, ..
+            } => {
                 self.resolve_expr_refs(owner, cond, sources, services);
                 self.resolve_expr_refs(owner, then, sources, services);
                 self.resolve_expr_refs(owner, else_, sources, services);
@@ -467,15 +592,23 @@ impl Linker {
                 self.resolve_expr_refs(owner, value, sources, services);
                 self.resolve_expr_refs(owner, default, sources, services);
             }
-            Expr::Aggregate { source, .. } => self.resolve_expr_refs(owner, source, sources, services),
-            Expr::NowOffset { amount, .. } => self.resolve_expr_refs(owner, amount, sources, services),
+            Expr::Aggregate { source, .. } => {
+                self.resolve_expr_refs(owner, source, sources, services)
+            }
+            Expr::NowOffset { amount, .. } => {
+                self.resolve_expr_refs(owner, amount, sources, services)
+            }
             Expr::Cached { expr, .. } => self.resolve_expr_refs(owner, expr, sources, services),
-            Expr::MapExpr { source, .. } => self.resolve_expr_refs(owner, source, sources, services),
+            Expr::MapExpr { source, .. } => {
+                self.resolve_expr_refs(owner, source, sources, services)
+            }
             Expr::FilterExpr { source, condition } => {
                 self.resolve_expr_refs(owner, source, sources, services);
                 self.resolve_expr_refs(owner, condition, sources, services);
             }
-            Expr::ReduceExpr { source, .. } => self.resolve_expr_refs(owner, source, sources, services),
+            Expr::ReduceExpr { source, .. } => {
+                self.resolve_expr_refs(owner, source, sources, services)
+            }
             Expr::SplitExpr { value, delimiter } => {
                 self.resolve_expr_refs(owner, value, sources, services);
                 self.resolve_expr_refs(owner, delimiter, sources, services);
@@ -523,7 +656,8 @@ impl Linker {
                 }
                 // REF dependencies are foreign keys — allowed to be cyclic
                 // Only structural embedding (LIST Shape, MAP Shape, nested SHAPE) causes cycles
-                let structural_deps: HashSet<String> = deps.into_iter()
+                let structural_deps: HashSet<String> = deps
+                    .into_iter()
                     .filter(|d| self.is_structural_dep(&s.name, d, program))
                     .collect();
                 shape_deps.insert(s.name.clone(), structural_deps);
@@ -547,7 +681,9 @@ impl Linker {
                 self.collect_type_shape_refs(v, deps);
             }
             TypeExpr::Maybe(inner) => self.collect_type_shape_refs(inner, deps),
-            TypeExpr::Ref { shape, .. } => { deps.insert(shape.clone()); }
+            TypeExpr::Ref { shape, .. } => {
+                deps.insert(shape.clone());
+            }
             _ => {}
         }
     }
@@ -606,11 +742,17 @@ impl Linker {
     fn shape_deps(&self, shape: &ShapeDef) -> Vec<String> {
         let mut deps = HashSet::new();
         for field in &shape.fields {
-            if let TypeExpr::Ref { shape: ref_shape, .. } = &field.ty {
+            if let TypeExpr::Ref {
+                shape: ref_shape, ..
+            } = &field.ty
+            {
                 deps.insert(ref_shape.clone());
             }
             for modifier in &field.modifiers {
-                if let Modifier::Ref { shape: ref_shape, .. } = modifier {
+                if let Modifier::Ref {
+                    shape: ref_shape, ..
+                } = modifier
+                {
                     deps.insert(ref_shape.clone());
                 }
             }
@@ -632,9 +774,18 @@ impl Linker {
             match step {
                 FlowStep::Let(l) => self.collect_expr_source_deps(&l.expr, deps),
                 FlowStep::Guard(g) => self.collect_expr_source_deps(&g.expr, deps),
-                FlowStep::Insert(i) => { deps.insert(i.source.clone()); }
-                FlowStep::Update(u) => { deps.insert(u.source.clone()); }
-                FlowStep::Delete(d) => { deps.insert(d.source.clone()); }
+                FlowStep::Insert(i) => {
+                    deps.insert(i.source.clone());
+                }
+                FlowStep::Upsert(u) => {
+                    deps.insert(u.source.clone());
+                }
+                FlowStep::Update(u) => {
+                    deps.insert(u.source.clone());
+                }
+                FlowStep::Delete(d) => {
+                    deps.insert(d.source.clone());
+                }
                 FlowStep::Match(m) => {
                     for branch in &m.branches {
                         self.collect_step_source_deps(&branch.steps, deps);
@@ -647,6 +798,10 @@ impl Linker {
                 FlowStep::Each(e) => {
                     self.collect_expr_source_deps(&e.source, deps);
                     self.collect_step_source_deps(&e.steps, deps);
+                }
+                FlowStep::Fanout(f) => {
+                    self.collect_expr_source_deps(&f.source, deps);
+                    deps.insert(f.insert.source.clone());
                 }
                 FlowStep::Try(t) => {
                     self.collect_step_source_deps(&t.body, deps);
@@ -831,7 +986,12 @@ FLOW get_user get /users/:id
 "#;
         let result = link_from(input);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("nonexistent")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("nonexistent"))
+        );
     }
 
     #[test]
@@ -854,7 +1014,12 @@ FLOW get_user get /users/:id
 "#;
         let result = link_from(input);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("nonexistent")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("nonexistent"))
+        );
     }
 
     #[test]
@@ -883,7 +1048,12 @@ SURFACE public v1
 "#;
         let result = link_from(input);
         assert!(!result.is_ok());
-        assert!(result.errors.iter().any(|e| e.message.contains("nonexistent_flow")));
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.message.contains("nonexistent_flow"))
+        );
     }
 
     #[test]
@@ -930,7 +1100,12 @@ SHAPE Order
 "#;
         let result = link_from(input);
         assert!(result.is_ok());
-        let order = result.manifest.shapes.iter().find(|s| s.name == "Order").unwrap();
+        let order = result
+            .manifest
+            .shapes
+            .iter()
+            .find(|s| s.name == "Order")
+            .unwrap();
         assert!(order.deps.contains(&"User".to_string()));
     }
 
@@ -966,8 +1141,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_booking_links_clean() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/booking.axis"),
+        )
+        .unwrap();
         let result = link_from(&input);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
         assert_eq!(result.manifest.shapes.len(), 3);
@@ -978,8 +1154,9 @@ FLOW get_user get /users/:id
     #[test]
     fn test_full_example_links_clean() {
         let input = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis")
-        ).unwrap();
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/full.axis"),
+        )
+        .unwrap();
         let result = link_from(&input);
         assert!(result.is_ok(), "errors: {:?}", result.errors);
         assert_eq!(result.manifest.shapes.len(), 3);

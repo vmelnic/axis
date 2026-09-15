@@ -136,6 +136,19 @@ pub enum Instruction {
         fields: Vec<(String, ExprIr)>,
         binding: Option<String>,
     },
+    Upsert {
+        source: String,
+        keys: Vec<(String, ExprIr)>,
+        sets: Vec<(String, ExprIr)>,
+        binding: Option<String>,
+        auto_updated_at: bool,
+    },
+    Fanout {
+        item: String,
+        collection: ExprIr,
+        source: String,
+        fields: Vec<(String, ExprIr)>,
+    },
     Update {
         source: String,
         wheres: Vec<FilterIr>,
@@ -174,8 +187,15 @@ pub struct RuleCheck {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConditionIr {
-    Compare { op: String, left: ExprIr, right: ExprIr },
-    Unary { op: String, operand: Box<ConditionIr> },
+    Compare {
+        op: String,
+        left: ExprIr,
+        right: ExprIr,
+    },
+    Unary {
+        op: String,
+        operand: Box<ConditionIr>,
+    },
     Expr(ExprIr),
 }
 
@@ -195,11 +215,25 @@ pub struct SortIr {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExprIr {
-    Literal { value: String },
-    Path { value: String },
-    BinaryOp { op: String, left: Box<ExprIr>, right: Box<ExprIr> },
-    UnaryOp { op: String, operand: Box<ExprIr> },
-    FuncCall { name: String, args: Vec<ExprIr> },
+    Literal {
+        value: String,
+    },
+    Path {
+        value: String,
+    },
+    BinaryOp {
+        op: String,
+        left: Box<ExprIr>,
+        right: Box<ExprIr>,
+    },
+    UnaryOp {
+        op: String,
+        operand: Box<ExprIr>,
+    },
+    FuncCall {
+        name: String,
+        args: Vec<ExprIr>,
+    },
 }
 
 pub fn generate(program: &Program) -> CodegenResult {
@@ -212,11 +246,30 @@ pub fn generate(program: &Program) -> CodegenResult {
 
     let shapes = collect_shapes(program);
     let sources = collect_sources(program);
-    let shape_to_source: std::collections::HashMap<String, String> = sources.iter()
+    let shape_to_source: std::collections::HashMap<String, String> = sources
+        .iter()
         .map(|s| (s.shape.clone(), s.name.clone()))
         .collect();
+    let auto_updated_sources: std::collections::HashSet<String> = sources
+        .iter()
+        .filter(|source| {
+            shapes.get(&source.shape).is_some_and(|shape| {
+                shape.fields.iter().any(|field| {
+                    field.name == "updated_at"
+                        && field
+                            .modifiers
+                            .iter()
+                            .any(|modifier| matches!(modifier, Modifier::Auto))
+                })
+            })
+        })
+        .map(|source| source.name.clone())
+        .collect();
 
-    let primary_dialect = sources.first().map(|s| source_dialect(s)).unwrap_or(SqlDialect::Postgres);
+    let primary_dialect = sources
+        .first()
+        .map(|s| source_dialect(s))
+        .unwrap_or(SqlDialect::Postgres);
 
     let sorted_sources = toposort_sources(&sources, &shapes);
     for source in &sorted_sources {
@@ -228,11 +281,11 @@ pub fn generate(program: &Program) -> CodegenResult {
     for construct in &program.constructs {
         match construct {
             Construct::Flow(flow) => {
-                routes.push(generate_route(flow));
+                routes.push(generate_route(flow, &auto_updated_sources));
             }
             Construct::Saga(saga) => {
                 generate_saga_journal(&mut sql, saga, primary_dialect);
-                sagas.push(generate_saga_plan(saga));
+                sagas.push(generate_saga_plan(saga, &auto_updated_sources));
             }
             Construct::Migrate(m) => {
                 migrations.push(generate_migration(m, &sources));
@@ -257,8 +310,22 @@ pub fn generate(program: &Program) -> CodegenResult {
     if has_effects {
         generate_outbox_table(&mut sql, primary_dialect);
     }
+    if program
+        .constructs
+        .iter()
+        .any(|construct| matches!(construct, Construct::Flow(flow) if flow.idempotency.is_some()))
+    {
+        generate_idempotency_table(&mut sql, primary_dialect);
+    }
 
-    CodegenResult { sql, routes, migrations, surfaces, sagas, streams }
+    CodegenResult {
+        sql,
+        routes,
+        migrations,
+        surfaces,
+        sagas,
+        streams,
+    }
 }
 
 fn flow_has_effects(steps: &[FlowStep]) -> bool {
@@ -280,7 +347,9 @@ fn toposort_sources<'a>(
 ) -> Vec<&'a SourceDef> {
     use std::collections::{HashMap, HashSet, VecDeque};
 
-    let shape_to_idx: HashMap<&str, usize> = sources.iter().enumerate()
+    let shape_to_idx: HashMap<&str, usize> = sources
+        .iter()
+        .enumerate()
         .map(|(i, s)| (s.shape.as_str(), i))
         .collect();
 
@@ -319,9 +388,7 @@ fn toposort_sources<'a>(
         in_degree[i] = deps[i].len();
     }
 
-    let mut queue: VecDeque<usize> = (0..sources.len())
-        .filter(|&i| in_degree[i] == 0)
-        .collect();
+    let mut queue: VecDeque<usize> = (0..sources.len()).filter(|&i| in_degree[i] == 0).collect();
     let mut order = Vec::with_capacity(sources.len());
 
     while let Some(idx) = queue.pop_front() {
@@ -357,9 +424,17 @@ fn collect_shapes(program: &Program) -> std::collections::HashMap<String, &Shape
 }
 
 fn collect_sources(program: &Program) -> Vec<&SourceDef> {
-    program.constructs.iter().filter_map(|c| {
-        if let Construct::Source(s) = c { Some(s) } else { None }
-    }).collect()
+    program
+        .constructs
+        .iter()
+        .filter_map(|c| {
+            if let Construct::Source(s) = c {
+                Some(s)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn source_dialect(source: &SourceDef) -> SqlDialect {
@@ -377,7 +452,12 @@ enum SqlDialect {
     Sqlite,
 }
 
-fn generate_table(sql: &mut String, source: &SourceDef, shape: &ShapeDef, shape_to_source: &std::collections::HashMap<String, String>) {
+fn generate_table(
+    sql: &mut String,
+    source: &SourceDef,
+    shape: &ShapeDef,
+    shape_to_source: &std::collections::HashMap<String, String>,
+) {
     let dialect = source_dialect(source);
     writeln!(sql, "CREATE TABLE IF NOT EXISTS {} (", source.name).unwrap();
 
@@ -387,8 +467,14 @@ fn generate_table(sql: &mut String, source: &SourceDef, shape: &ShapeDef, shape_
         write!(sql, "  {} {}", field.name, col_type).unwrap();
 
         let is_pk = field.modifiers.iter().any(|m| matches!(m, Modifier::Pk));
-        let is_required = field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
-        let is_unique = field.modifiers.iter().any(|m| matches!(m, Modifier::Unique));
+        let is_required = field
+            .modifiers
+            .iter()
+            .any(|m| matches!(m, Modifier::Required));
+        let is_unique = field
+            .modifiers
+            .iter()
+            .any(|m| matches!(m, Modifier::Unique));
         let is_auto = field.modifiers.iter().any(|m| matches!(m, Modifier::Auto));
 
         if is_pk {
@@ -403,10 +489,16 @@ fn generate_table(sql: &mut String, source: &SourceDef, shape: &ShapeDef, shape_
 
         if is_auto {
             match (&field.ty, dialect) {
-                (TypeExpr::Uuid, SqlDialect::Postgres) => write!(sql, " DEFAULT gen_random_uuid()").unwrap(),
-                (TypeExpr::Timestamp, SqlDialect::Postgres) => write!(sql, " DEFAULT now()").unwrap(),
+                (TypeExpr::Uuid, SqlDialect::Postgres) => {
+                    write!(sql, " DEFAULT gen_random_uuid()").unwrap()
+                }
+                (TypeExpr::Timestamp, SqlDialect::Postgres) => {
+                    write!(sql, " DEFAULT now()").unwrap()
+                }
                 (TypeExpr::Timestamp, SqlDialect::Mysql) => write!(sql, " DEFAULT NOW()").unwrap(),
-                (TypeExpr::Timestamp, SqlDialect::Sqlite) => write!(sql, " DEFAULT (datetime('now'))").unwrap(),
+                (TypeExpr::Timestamp, SqlDialect::Sqlite) => {
+                    write!(sql, " DEFAULT (datetime('now'))").unwrap()
+                }
                 _ => {}
             }
         }
@@ -426,13 +518,27 @@ fn generate_table(sql: &mut String, source: &SourceDef, shape: &ShapeDef, shape_
             }
         }
 
-        if let TypeExpr::Ref { shape: ref_shape, field: ref_field } = &field.ty {
-            let table = shape_to_source.get(ref_shape).map(|s| s.as_str()).unwrap_or_else(|| ref_shape.as_str());
+        if let TypeExpr::Ref {
+            shape: ref_shape,
+            field: ref_field,
+        } = &field.ty
+        {
+            let table = shape_to_source
+                .get(ref_shape)
+                .map(|s| s.as_str())
+                .unwrap_or_else(|| ref_shape.as_str());
             write!(sql, " REFERENCES {}({})", table.to_lowercase(), ref_field).unwrap();
         }
         for m in &field.modifiers {
-            if let Modifier::Ref { shape, field: ref_field } = m {
-                let table = shape_to_source.get(shape).map(|s| s.as_str()).unwrap_or_else(|| shape.as_str());
+            if let Modifier::Ref {
+                shape,
+                field: ref_field,
+            } = m
+            {
+                let table = shape_to_source
+                    .get(shape)
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| shape.as_str());
                 write!(sql, " REFERENCES {}({})", table.to_lowercase(), ref_field).unwrap();
             }
         }
@@ -446,35 +552,77 @@ fn generate_table(sql: &mut String, source: &SourceDef, shape: &ShapeDef, shape_
     writeln!(sql, ");\n").unwrap();
 
     for index in &source.indexes {
-        let is_unique = index.fields.iter().any(|f| matches!(&f.suffix, Some(IndexSuffix::Unique)));
-        let is_geo = index.fields.iter().any(|f| matches!(&f.suffix, Some(IndexSuffix::Geo)));
-        let is_text = index.fields.iter().any(|f| matches!(&f.suffix, Some(IndexSuffix::Text)));
+        let is_unique = index
+            .fields
+            .iter()
+            .any(|f| matches!(&f.suffix, Some(IndexSuffix::Unique)));
+        let is_geo = index
+            .fields
+            .iter()
+            .any(|f| matches!(&f.suffix, Some(IndexSuffix::Geo)));
+        let is_text = index
+            .fields
+            .iter()
+            .any(|f| matches!(&f.suffix, Some(IndexSuffix::Text)));
         let field_names: Vec<&str> = index.fields.iter().map(|f| f.name.as_str()).collect();
         let idx_name = format!("idx_{}_{}", source.name, field_names.join("_"));
 
         if is_geo && matches!(dialect, SqlDialect::Postgres) {
             let col = &index.fields[0].name;
-            writeln!(sql, "CREATE INDEX IF NOT EXISTS {} ON {} USING gist ({});", idx_name, source.name, col).unwrap();
+            writeln!(
+                sql,
+                "CREATE INDEX IF NOT EXISTS {} ON {} USING gist ({});",
+                idx_name, source.name, col
+            )
+            .unwrap();
         } else if is_text && matches!(dialect, SqlDialect::Postgres) {
             let col = &index.fields[0].name;
-            writeln!(sql, "CREATE INDEX IF NOT EXISTS {} ON {} USING gin (to_tsvector('english', {}));", idx_name, source.name, col).unwrap();
+            writeln!(
+                sql,
+                "CREATE INDEX IF NOT EXISTS {} ON {} USING gin (to_tsvector('english', {}));",
+                idx_name, source.name, col
+            )
+            .unwrap();
         } else if is_geo || is_text {
             // GIN/GiST not available on MySQL/SQLite — fall back to regular index
             let idx_fields: Vec<&str> = index.fields.iter().map(|f| f.name.as_str()).collect();
-            writeln!(sql, "CREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, source.name, idx_fields.join(", ")).unwrap();
+            writeln!(
+                sql,
+                "CREATE INDEX IF NOT EXISTS {} ON {} ({});",
+                idx_name,
+                source.name,
+                idx_fields.join(", ")
+            )
+            .unwrap();
         } else {
-            let idx_fields: Vec<String> = index.fields.iter().map(|f| {
-                match &f.suffix {
+            let idx_fields: Vec<String> = index
+                .fields
+                .iter()
+                .map(|f| match &f.suffix {
                     Some(IndexSuffix::Desc) => format!("{} DESC", f.name),
                     Some(IndexSuffix::Asc) => format!("{} ASC", f.name),
                     _ => f.name.clone(),
-                }
-            }).collect();
+                })
+                .collect();
 
             if is_unique {
-                writeln!(sql, "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, source.name, idx_fields.join(", ")).unwrap();
+                writeln!(
+                    sql,
+                    "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ({});",
+                    idx_name,
+                    source.name,
+                    idx_fields.join(", ")
+                )
+                .unwrap();
             } else {
-                writeln!(sql, "CREATE INDEX IF NOT EXISTS {} ON {} ({});", idx_name, source.name, idx_fields.join(", ")).unwrap();
+                writeln!(
+                    sql,
+                    "CREATE INDEX IF NOT EXISTS {} ON {} ({});",
+                    idx_name,
+                    source.name,
+                    idx_fields.join(", ")
+                )
+                .unwrap();
             }
         }
     }
@@ -510,14 +658,32 @@ fn sql_type(ty: &TypeExpr, dialect: SqlDialect) -> String {
         (TypeExpr::Int { .. }, _) => "INTEGER".into(),
 
         (TypeExpr::Decimal { .. }, SqlDialect::Sqlite) => "REAL".into(),
-        (TypeExpr::Decimal { precision: Some(p), scale: Some(s) }, SqlDialect::Mysql) => format!("DECIMAL({},{})", p, s),
-        (TypeExpr::Decimal { precision: Some(p), scale: Some(s) }, _) => format!("NUMERIC({},{})", p, s),
+        (
+            TypeExpr::Decimal {
+                precision: Some(p),
+                scale: Some(s),
+            },
+            SqlDialect::Mysql,
+        ) => format!("DECIMAL({},{})", p, s),
+        (
+            TypeExpr::Decimal {
+                precision: Some(p),
+                scale: Some(s),
+            },
+            _,
+        ) => format!("NUMERIC({},{})", p, s),
         (TypeExpr::Decimal { .. }, SqlDialect::Mysql) => "DECIMAL".into(),
         (TypeExpr::Decimal { .. }, _) => "NUMERIC".into(),
 
         (TypeExpr::Enum(variants), _) => {
-            format!("VARCHAR(50) CHECK ({{col}} IN ({}))",
-                variants.iter().map(|v| format!("'{}'", v)).collect::<Vec<_>>().join(", "))
+            format!(
+                "VARCHAR(50) CHECK ({{col}} IN ({}))",
+                variants
+                    .iter()
+                    .map(|v| format!("'{}'", v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
 
         (TypeExpr::Json, SqlDialect::Postgres) => "JSONB".into(),
@@ -558,7 +724,10 @@ fn sql_literal(val: &LiteralValue, dialect: SqlDialect) -> String {
     }
 }
 
-fn generate_route(flow: &FlowDef) -> RouteInfo {
+fn generate_route(
+    flow: &FlowDef,
+    auto_updated_sources: &std::collections::HashSet<String>,
+) -> RouteInfo {
     let method = match flow.method {
         HttpMethod::Get => "GET",
         HttpMethod::Post => "POST",
@@ -566,7 +735,8 @@ fn generate_route(flow: &FlowDef) -> RouteInfo {
         HttpMethod::Patch => "PATCH",
         HttpMethod::Delete => "DELETE",
         HttpMethod::Webhook => "POST",
-    }.into();
+    }
+    .into();
 
     let auth = flow.auth.as_ref().map(|a| match a {
         AuthDecl::None => "none".into(),
@@ -578,7 +748,7 @@ fn generate_route(flow: &FlowDef) -> RouteInfo {
         AuthDecl::WebhookSignature { .. } => "webhook_signature".into(),
     });
 
-    let instructions = lower_steps(&flow.steps);
+    let instructions = lower_steps(&flow.steps, auto_updated_sources);
 
     let return_binding = flow.return_stmt.body.as_ref().and_then(|b| match b {
         ReturnBody::Binding(name) => Some(name.clone()),
@@ -596,18 +766,23 @@ fn generate_route(flow: &FlowDef) -> RouteInfo {
     }
 }
 
-fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
+fn lower_steps(
+    steps: &[FlowStep],
+    auto_updated_sources: &std::collections::HashSet<String>,
+) -> Vec<Instruction> {
     let mut instructions = Vec::new();
     for step in steps {
         match step {
             FlowStep::Rule(rule) => {
-                let checks = rule.requires.iter().map(|r| {
-                    RuleCheck {
+                let checks = rule
+                    .requires
+                    .iter()
+                    .map(|r| RuleCheck {
                         path: r.path.as_str(),
                         op: compare_op_str(&r.op),
                         value: lower_expr(&r.value),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 instructions.push(Instruction::CheckRule {
                     name: rule.name.clone(),
                     checks,
@@ -621,36 +796,48 @@ fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
                     condition: lower_condition(&guard.expr),
                 });
             }
-            FlowStep::Let(let_step) => {
-                match &let_step.expr {
-                    Expr::Fetch { source, filters, or_code, or_message, .. } => {
-                        instructions.push(Instruction::FetchOne {
-                            binding: let_step.name.clone(),
-                            source: source.clone(),
-                            filters: lower_filters(filters),
-                            or_code: *or_code,
-                            or_message: or_message.clone(),
-                        });
-                    }
-                    Expr::Query { source, filters, sorts, page_size, .. } => {
-                        instructions.push(Instruction::QueryMany {
-                            binding: let_step.name.clone(),
-                            source: source.clone(),
-                            filters: lower_filters(filters),
-                            sorts: lower_sorts(sorts),
-                            page_size: page_size.as_ref().map(|p| lower_expr(p)),
-                        });
-                    }
-                    _ => {
-                        instructions.push(Instruction::Compute {
-                            binding: let_step.name.clone(),
-                            expr: lower_expr(&let_step.expr),
-                        });
-                    }
+            FlowStep::Let(let_step) => match &let_step.expr {
+                Expr::Fetch {
+                    source,
+                    filters,
+                    or_code,
+                    or_message,
+                    ..
+                } => {
+                    instructions.push(Instruction::FetchOne {
+                        binding: let_step.name.clone(),
+                        source: source.clone(),
+                        filters: lower_filters(filters),
+                        or_code: *or_code,
+                        or_message: or_message.clone(),
+                    });
                 }
-            }
+                Expr::Query {
+                    source,
+                    filters,
+                    sorts,
+                    page_size,
+                    ..
+                } => {
+                    instructions.push(Instruction::QueryMany {
+                        binding: let_step.name.clone(),
+                        source: source.clone(),
+                        filters: lower_filters(filters),
+                        sorts: lower_sorts(sorts),
+                        page_size: page_size.as_ref().map(|p| lower_expr(p)),
+                    });
+                }
+                _ => {
+                    instructions.push(Instruction::Compute {
+                        binding: let_step.name.clone(),
+                        expr: lower_expr(&let_step.expr),
+                    });
+                }
+            },
             FlowStep::Insert(insert) => {
-                let fields = insert.fields.iter()
+                let fields = insert
+                    .fields
+                    .iter()
                     .map(|(k, v)| (k.clone(), lower_expr(v)))
                     .collect();
                 instructions.push(Instruction::Insert {
@@ -659,13 +846,37 @@ fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
                     binding: insert.binding.clone(),
                 });
             }
+            FlowStep::Upsert(upsert) => {
+                instructions.push(Instruction::Upsert {
+                    source: upsert.source.clone(),
+                    keys: upsert
+                        .keys
+                        .iter()
+                        .map(|(k, v)| (k.clone(), lower_expr(v)))
+                        .collect(),
+                    sets: upsert
+                        .sets
+                        .iter()
+                        .map(|s| (s.field.clone(), lower_expr(&s.value)))
+                        .collect(),
+                    binding: upsert.binding.clone(),
+                    auto_updated_at: auto_updated_sources.contains(&upsert.source)
+                        && !upsert.sets.iter().any(|set| set.field == "updated_at"),
+                });
+            }
             FlowStep::Update(update) => {
-                let wheres = update.wheres.iter().map(|w| FilterIr {
-                    field: w.field.clone(),
-                    op: compare_op_str(&w.op),
-                    value: lower_expr(&w.value),
-                }).collect();
-                let sets = update.sets.iter()
+                let wheres = update
+                    .wheres
+                    .iter()
+                    .map(|w| FilterIr {
+                        field: w.field.clone(),
+                        op: compare_op_str(&w.op),
+                        value: lower_expr(&w.value),
+                    })
+                    .collect();
+                let sets = update
+                    .sets
+                    .iter()
                     .map(|s| (s.field.clone(), lower_expr(&s.value)))
                     .collect();
                 instructions.push(Instruction::Update {
@@ -679,15 +890,32 @@ fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
                 });
             }
             FlowStep::Delete(delete) => {
-                let wheres = delete.wheres.iter().map(|w| FilterIr {
-                    field: w.field.clone(),
-                    op: compare_op_str(&w.op),
-                    value: lower_expr(&w.value),
-                }).collect();
+                let wheres = delete
+                    .wheres
+                    .iter()
+                    .map(|w| FilterIr {
+                        field: w.field.clone(),
+                        op: compare_op_str(&w.op),
+                        value: lower_expr(&w.value),
+                    })
+                    .collect();
                 instructions.push(Instruction::Delete {
                     source: delete.source.clone(),
                     wheres,
                     or_code: delete.or_code,
+                });
+            }
+            FlowStep::Fanout(fanout) => {
+                instructions.push(Instruction::Fanout {
+                    item: fanout.binding.clone(),
+                    collection: lower_expr(&fanout.source),
+                    source: fanout.insert.source.clone(),
+                    fields: fanout
+                        .insert
+                        .fields
+                        .iter()
+                        .map(|(k, v)| (k.clone(), lower_expr(v)))
+                        .collect(),
                 });
             }
             FlowStep::Effect(effect) => {
@@ -696,27 +924,41 @@ fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
                     EffectKind::PushNotification => "push_notification",
                     EffectKind::Async => "async",
                     EffectKind::Webhook => "webhook",
-                }.into();
-                let fields = effect.fields.iter().filter_map(|f| {
-                    match f {
-                        EffectField::Template(t) => Some(("template".into(), ExprIr::Literal { value: t.clone() })),
+                }
+                .into();
+                let fields = effect
+                    .fields
+                    .iter()
+                    .filter_map(|f| match f {
+                        EffectField::Template(t) => {
+                            Some(("template".into(), ExprIr::Literal { value: t.clone() }))
+                        }
                         EffectField::To(e) => Some(("to".into(), lower_expr(e))),
                         EffectField::Url(e) => Some(("url".into(), lower_expr(e))),
-                        EffectField::Event(e) => Some(("event".into(), ExprIr::Literal { value: e.clone() })),
-                        EffectField::Task(t) => Some(("task".into(), ExprIr::Literal { value: t.clone() })),
+                        EffectField::Event(e) => {
+                            Some(("event".into(), ExprIr::Literal { value: e.clone() }))
+                        }
+                        EffectField::Task(t) => {
+                            Some(("task".into(), ExprIr::Literal { value: t.clone() }))
+                        }
                         EffectField::Data(_) => None,
-                    }
-                }).collect();
+                    })
+                    .collect();
                 instructions.push(Instruction::EmitEffect { kind, fields });
             }
             FlowStep::Match(m) => {
-                let branches = m.branches.iter().map(|b| {
-                    MatchBranchIr {
+                let branches = m
+                    .branches
+                    .iter()
+                    .map(|b| MatchBranchIr {
                         condition: lower_condition(&b.condition),
-                        instructions: lower_steps(&b.steps),
-                    }
-                }).collect();
-                let default = m.default.as_ref().map(|d| lower_steps(d));
+                        instructions: lower_steps(&b.steps, auto_updated_sources),
+                    })
+                    .collect();
+                let default = m
+                    .default
+                    .as_ref()
+                    .map(|d| lower_steps(d, auto_updated_sources));
                 instructions.push(Instruction::Match { branches, default });
             }
             FlowStep::Set(s) => {
@@ -739,10 +981,14 @@ fn lower_steps(steps: &[FlowStep]) -> Vec<Instruction> {
     instructions
 }
 
-fn lower_expr(expr: &Expr) -> ExprIr {
+pub(crate) fn lower_expr(expr: &Expr) -> ExprIr {
     match expr {
-        Expr::Literal(lit) => ExprIr::Literal { value: sql_literal(lit, SqlDialect::Postgres) },
-        Expr::DotPath(path) => ExprIr::Path { value: path.as_str() },
+        Expr::Literal(lit) => ExprIr::Literal {
+            value: sql_literal(lit, SqlDialect::Postgres),
+        },
+        Expr::DotPath(path) => ExprIr::Path {
+            value: path.as_str(),
+        },
         Expr::Binary { op, left, right } => ExprIr::BinaryOp {
             op: binary_op_str(op),
             left: Box::new(lower_expr(left)),
@@ -752,7 +998,9 @@ fn lower_expr(expr: &Expr) -> ExprIr {
             op: unary_op_str(op),
             operand: Box::new(lower_expr(operand)),
         },
-        Expr::If { cond, then, else_, .. } => ExprIr::FuncCall {
+        Expr::If {
+            cond, then, else_, ..
+        } => ExprIr::FuncCall {
             name: "IF".into(),
             args: vec![lower_expr(cond), lower_expr(then), lower_expr(else_)],
         },
@@ -770,9 +1018,16 @@ fn lower_expr(expr: &Expr) -> ExprIr {
             if let Some(f) = field {
                 args.push(ExprIr::Path { value: f.clone() });
             }
-            ExprIr::FuncCall { name: name.into(), args }
+            ExprIr::FuncCall {
+                name: name.into(),
+                args,
+            }
         }
-        Expr::NowOffset { direction, amount, unit } => {
+        Expr::NowOffset {
+            direction,
+            amount,
+            unit,
+        } => {
             let dir = match direction {
                 OffsetDirection::Plus => "NOW_PLUS",
                 OffsetDirection::Minus => "NOW_MINUS",
@@ -805,24 +1060,39 @@ fn lower_expr(expr: &Expr) -> ExprIr {
                 args: vec![lower_expr(a), lower_expr(b), lower_expr(c)],
             }
         }
-        Expr::Fetch { source, filters, or_code, .. } => ExprIr::FuncCall {
+        Expr::Fetch {
+            source,
+            filters,
+            or_code,
+            ..
+        } => ExprIr::FuncCall {
             name: format!("FETCH_{}", source),
-            args: std::iter::once(ExprIr::Literal { value: or_code.to_string() })
-                .chain(filters.iter().map(|f| lower_expr(&f.value)))
-                .collect(),
+            args: std::iter::once(ExprIr::Literal {
+                value: or_code.to_string(),
+            })
+            .chain(filters.iter().map(|f| lower_expr(&f.value)))
+            .collect(),
         },
         Expr::Query { source, .. } => ExprIr::FuncCall {
             name: format!("QUERY_{}", source),
             args: vec![],
         },
-        Expr::Call { service, method, args, .. } => ExprIr::FuncCall {
+        Expr::Call {
+            service,
+            method,
+            args,
+            ..
+        } => ExprIr::FuncCall {
             name: format!("{}.{}", service, method),
             args: args.iter().map(|(_, v)| lower_expr(v)).collect(),
         },
         Expr::Cached { expr, .. } => lower_expr(expr),
         Expr::WasmCall { hash, inputs } => ExprIr::FuncCall {
             name: format!("wasm:{}", hash),
-            args: inputs.iter().map(|i| ExprIr::Path { value: i.clone() }).collect(),
+            args: inputs
+                .iter()
+                .map(|i| ExprIr::Path { value: i.clone() })
+                .collect(),
         },
         Expr::MapExpr { source, .. } => ExprIr::FuncCall {
             name: "MAP".into(),
@@ -879,21 +1149,27 @@ fn lower_condition(expr: &Expr) -> ConditionIr {
 }
 
 fn lower_filters(filters: &[FilterClause]) -> Vec<FilterIr> {
-    filters.iter().map(|f| FilterIr {
-        field: f.field.clone(),
-        op: filter_op_str(&f.op),
-        value: lower_expr(&f.value),
-    }).collect()
+    filters
+        .iter()
+        .map(|f| FilterIr {
+            field: f.field.clone(),
+            op: filter_op_str(&f.op),
+            value: lower_expr(&f.value),
+        })
+        .collect()
 }
 
 fn lower_sorts(sorts: &[SortClause]) -> Vec<SortIr> {
-    sorts.iter().map(|s| SortIr {
-        field: s.field.clone(),
-        direction: match s.direction {
-            SortDirection::Asc => "ASC".into(),
-            SortDirection::Desc => "DESC".into(),
-        },
-    }).collect()
+    sorts
+        .iter()
+        .map(|s| SortIr {
+            field: s.field.clone(),
+            direction: match s.direction {
+                SortDirection::Asc => "ASC".into(),
+                SortDirection::Desc => "DESC".into(),
+            },
+        })
+        .collect()
 }
 
 fn filter_op_str(op: &FilterOp) -> String {
@@ -909,7 +1185,8 @@ fn filter_op_str(op: &FilterOp) -> String {
         FilterOp::Like => "LIKE",
         FilterOp::StartsWith => "STARTS_WITH",
         FilterOp::Contains => "CONTAINS",
-    }.into()
+    }
+    .into()
 }
 
 fn compare_op_str(op: &CompareOp) -> String {
@@ -921,7 +1198,8 @@ fn compare_op_str(op: &CompareOp) -> String {
         CompareOp::Lt => "<",
         CompareOp::Lte => "<=",
         CompareOp::In => "IN",
-    }.into()
+    }
+    .into()
 }
 
 fn binary_op_str(op: &BinaryOp) -> String {
@@ -949,7 +1227,8 @@ fn binary_op_str(op: &BinaryOp) -> String {
         BinaryOp::Round => "ROUND",
         BinaryOp::Coalesce => "COALESCE",
         BinaryOp::FormatDate => "FORMAT_DATE",
-    }.into()
+    }
+    .into()
 }
 
 fn unary_op_str(op: &UnaryOp) -> String {
@@ -970,7 +1249,8 @@ fn unary_op_str(op: &UnaryOp) -> String {
         UnaryOp::First => "FIRST",
         UnaryOp::Last => "LAST",
         UnaryOp::Count => "COUNT",
-    }.into()
+    }
+    .into()
 }
 
 impl std::fmt::Display for RouteInfo {
@@ -987,30 +1267,58 @@ impl std::fmt::Display for RouteInfo {
                         writeln!(f, "    {} {} {:?}", c.path, c.op, c.value)?;
                     }
                 }
-                Instruction::Guard { name, error_code, error_message, .. } => {
+                Instruction::Guard {
+                    name,
+                    error_code,
+                    error_message,
+                    ..
+                } => {
                     write!(f, "  GUARD {} {}", name, error_code)?;
                     if let Some(msg) = error_message {
                         write!(f, " \"{}\"", msg)?;
                     }
                     writeln!(f)?;
                 }
-                Instruction::FetchOne { binding, source, or_code, .. } => {
+                Instruction::FetchOne {
+                    binding,
+                    source,
+                    or_code,
+                    ..
+                } => {
                     writeln!(f, "  FETCH {} -> {} (or {})", source, binding, or_code)?;
                 }
-                Instruction::QueryMany { binding, source, .. } => {
+                Instruction::QueryMany {
+                    binding, source, ..
+                } => {
                     writeln!(f, "  QUERY {} -> {}", source, binding)?;
                 }
                 Instruction::Compute { binding, expr } => {
                     writeln!(f, "  COMPUTE {} = {:?}", binding, expr)?;
                 }
-                Instruction::Insert { source, binding, .. } => {
+                Instruction::Insert {
+                    source, binding, ..
+                } => {
                     write!(f, "  INSERT {}", source)?;
                     if let Some(b) = binding {
                         write!(f, " -> {}", b)?;
                     }
                     writeln!(f)?;
                 }
-                Instruction::Update { source, binding, .. } => {
+                Instruction::Upsert {
+                    source, binding, ..
+                } => {
+                    write!(f, "  UPSERT {}", source)?;
+                    if let Some(b) = binding {
+                        write!(f, " -> {}", b)?;
+                    }
+                    writeln!(f)?;
+                }
+                Instruction::Fanout { source, item, .. } => {
+                    writeln!(f, "  FANOUT {} -> {}", item, source)?;
+                }
+                Instruction::Update {
+                    source, binding, ..
+                } => {
                     write!(f, "  UPDATE {}", source)?;
                     if let Some(b) = binding {
                         write!(f, " -> {}", b)?;
@@ -1030,11 +1338,21 @@ impl std::fmt::Display for RouteInfo {
                         for inst in &branch.instructions {
                             write!(f, "      ")?;
                             match inst {
-                                Instruction::FetchOne { binding, source, .. } => writeln!(f, "FETCH {} -> {}", source, binding)?,
-                                Instruction::Compute { binding, .. } => writeln!(f, "COMPUTE {}", binding)?,
-                                Instruction::Update { source, .. } => writeln!(f, "UPDATE {}", source)?,
-                                Instruction::Insert { source, .. } => writeln!(f, "INSERT {}", source)?,
-                                Instruction::Delete { source, .. } => writeln!(f, "DELETE {}", source)?,
+                                Instruction::FetchOne {
+                                    binding, source, ..
+                                } => writeln!(f, "FETCH {} -> {}", source, binding)?,
+                                Instruction::Compute { binding, .. } => {
+                                    writeln!(f, "COMPUTE {}", binding)?
+                                }
+                                Instruction::Update { source, .. } => {
+                                    writeln!(f, "UPDATE {}", source)?
+                                }
+                                Instruction::Insert { source, .. } => {
+                                    writeln!(f, "INSERT {}", source)?
+                                }
+                                Instruction::Delete { source, .. } => {
+                                    writeln!(f, "DELETE {}", source)?
+                                }
                                 _ => writeln!(f, "{:?}", std::mem::discriminant(inst))?,
                             }
                         }
@@ -1047,9 +1365,15 @@ impl std::fmt::Display for RouteInfo {
                         for inst in def {
                             write!(f, "      ")?;
                             match inst {
-                                Instruction::Update { source, .. } => writeln!(f, "UPDATE {}", source)?,
-                                Instruction::Insert { source, .. } => writeln!(f, "INSERT {}", source)?,
-                                Instruction::Delete { source, .. } => writeln!(f, "DELETE {}", source)?,
+                                Instruction::Update { source, .. } => {
+                                    writeln!(f, "UPDATE {}", source)?
+                                }
+                                Instruction::Insert { source, .. } => {
+                                    writeln!(f, "INSERT {}", source)?
+                                }
+                                Instruction::Delete { source, .. } => {
+                                    writeln!(f, "DELETE {}", source)?
+                                }
                                 _ => writeln!(f, "{:?}", std::mem::discriminant(inst))?,
                             }
                         }
@@ -1091,7 +1415,12 @@ fn generate_saga_journal(sql: &mut String, saga: &SagaDef, dialect: SqlDialect) 
     writeln!(sql, "  completed_at {}", ts_t).unwrap();
     writeln!(sql, ");").unwrap();
     writeln!(sql).unwrap();
-    writeln!(sql, "CREATE INDEX IF NOT EXISTS idx_{}_saga_id ON {} (saga_id);", table, table).unwrap();
+    writeln!(
+        sql,
+        "CREATE INDEX IF NOT EXISTS idx_{}_saga_id ON {} (saga_id);",
+        table, table
+    )
+    .unwrap();
     writeln!(sql).unwrap();
 }
 
@@ -1117,16 +1446,65 @@ fn generate_outbox_table(sql: &mut String, dialect: SqlDialect) {
     writeln!(sql, "  url TEXT,").unwrap();
     writeln!(sql, "  event VARCHAR(200),").unwrap();
     writeln!(sql, "  task VARCHAR(200),").unwrap();
+    writeln!(sql, "  payload TEXT,").unwrap();
     writeln!(sql, "  status VARCHAR(20) NOT NULL DEFAULT 'pending',").unwrap();
     writeln!(sql, "  created_at {}{},", ts_t, now_default).unwrap();
-    writeln!(sql, "  processed_at {}", ts_t).unwrap();
+    if matches!(dialect, SqlDialect::Mysql) {
+        writeln!(sql, "  processed_at {},", ts_t).unwrap();
+        writeln!(sql, "  INDEX idx_axis_outbox_status (status),").unwrap();
+    } else {
+        writeln!(sql, "  processed_at {},", ts_t).unwrap();
+    }
+    writeln!(
+        sql,
+        "  CHECK (status IN ('pending', 'processing', 'completed', 'failed'))"
+    )
+    .unwrap();
     writeln!(sql, ");").unwrap();
     writeln!(sql).unwrap();
-    writeln!(sql, "CREATE INDEX IF NOT EXISTS idx_axis_outbox_status ON _axis_outbox (status);").unwrap();
+    if !matches!(dialect, SqlDialect::Mysql) {
+        writeln!(
+            sql,
+            "CREATE INDEX IF NOT EXISTS idx_axis_outbox_status ON _axis_outbox (status);"
+        )
+        .unwrap();
+    }
     writeln!(sql).unwrap();
 }
 
-fn generate_saga_plan(saga: &SagaDef) -> SagaPlan {
+fn generate_idempotency_table(sql: &mut String, dialect: SqlDialect) {
+    writeln!(sql).unwrap();
+    writeln!(sql, "CREATE TABLE IF NOT EXISTS _axis_idempotency (").unwrap();
+    writeln!(sql, "  flow_name VARCHAR(200) NOT NULL,").unwrap();
+    writeln!(sql, "  scope_key VARCHAR(512) NOT NULL,").unwrap();
+    writeln!(sql, "  idempotency_key VARCHAR(255) NOT NULL,").unwrap();
+    writeln!(sql, "  request_hash CHAR(64) NOT NULL,").unwrap();
+    writeln!(
+        sql,
+        "  state VARCHAR(16) NOT NULL CHECK (state IN ('processing', 'completed')),"
+    )
+    .unwrap();
+    writeln!(sql, "  response_status BIGINT,").unwrap();
+    writeln!(sql, "  response_body TEXT,").unwrap();
+    writeln!(sql, "  response_headers TEXT,").unwrap();
+    writeln!(sql, "  expires_at BIGINT NOT NULL,").unwrap();
+    writeln!(sql, "  created_at BIGINT NOT NULL,").unwrap();
+    writeln!(sql, "  updated_at BIGINT NOT NULL,").unwrap();
+    if matches!(dialect, SqlDialect::Mysql) {
+        writeln!(sql, "  INDEX idx_axis_idempotency_expires_at (expires_at),").unwrap();
+    }
+    writeln!(sql, "  PRIMARY KEY (flow_name, scope_key, idempotency_key)").unwrap();
+    writeln!(sql, ");").unwrap();
+    if !matches!(dialect, SqlDialect::Mysql) {
+        writeln!(sql, "CREATE INDEX IF NOT EXISTS idx_axis_idempotency_expires_at ON _axis_idempotency (expires_at);").unwrap();
+    }
+    writeln!(sql).unwrap();
+}
+
+fn generate_saga_plan(
+    saga: &SagaDef,
+    auto_updated_sources: &std::collections::HashSet<String>,
+) -> SagaPlan {
     let method = match saga.method {
         HttpMethod::Get => "GET",
         HttpMethod::Post => "POST",
@@ -1134,7 +1512,8 @@ fn generate_saga_plan(saga: &SagaDef) -> SagaPlan {
         HttpMethod::Patch => "PATCH",
         HttpMethod::Delete => "DELETE",
         HttpMethod::Webhook => "POST",
-    }.into();
+    }
+    .into();
 
     let auth = saga.auth.as_ref().map(|a| match a {
         AuthDecl::None => "none".into(),
@@ -1146,44 +1525,69 @@ fn generate_saga_plan(saga: &SagaDef) -> SagaPlan {
         AuthDecl::WebhookSignature { .. } => "webhook_signature".into(),
     });
 
-    let steps = saga.steps.iter().map(|step| {
-        let instructions = lower_steps(&step.flow_steps);
-        let verify = step.verify.as_ref().map(lower_condition);
-        let compensate = match &step.compensate {
-            Compensate::None => vec![],
-            Compensate::Steps(s) => lower_steps(s),
-        };
-        SagaStepPlan {
-            name: step.name.clone(),
-            instructions,
-            verify,
-            yields: step.yields.clone(),
-            compensate,
-        }
-    }).collect();
+    let steps = saga
+        .steps
+        .iter()
+        .map(|step| {
+            let instructions = lower_steps(&step.flow_steps, auto_updated_sources);
+            let verify = step.verify.as_ref().map(lower_condition);
+            let compensate = match &step.compensate {
+                Compensate::None => vec![],
+                Compensate::Steps(s) => lower_steps(s, auto_updated_sources),
+            };
+            SagaStepPlan {
+                name: step.name.clone(),
+                instructions,
+                verify,
+                yields: step.yields.clone(),
+                compensate,
+            }
+        })
+        .collect();
 
-    let on_success_effects = saga.on_success.effects.iter().map(|effect| {
-        let kind = match effect.kind {
-            EffectKind::Email => "email",
-            EffectKind::PushNotification => "push_notification",
-            EffectKind::Async => "async",
-            EffectKind::Webhook => "webhook",
-        }.into();
-        let fields = effect.fields.iter().filter_map(|f| match f {
-            EffectField::Template(t) => Some(("template".into(), ExprIr::Literal { value: t.clone() })),
-            EffectField::To(e) => Some(("to".into(), lower_expr(e))),
-            EffectField::Url(e) => Some(("url".into(), lower_expr(e))),
-            EffectField::Event(e) => Some(("event".into(), ExprIr::Literal { value: e.clone() })),
-            EffectField::Task(t) => Some(("task".into(), ExprIr::Literal { value: t.clone() })),
-            EffectField::Data(_) => None,
-        }).collect();
-        Instruction::EmitEffect { kind, fields }
-    }).collect();
+    let on_success_effects = saga
+        .on_success
+        .effects
+        .iter()
+        .map(|effect| {
+            let kind = match effect.kind {
+                EffectKind::Email => "email",
+                EffectKind::PushNotification => "push_notification",
+                EffectKind::Async => "async",
+                EffectKind::Webhook => "webhook",
+            }
+            .into();
+            let fields = effect
+                .fields
+                .iter()
+                .filter_map(|f| match f {
+                    EffectField::Template(t) => {
+                        Some(("template".into(), ExprIr::Literal { value: t.clone() }))
+                    }
+                    EffectField::To(e) => Some(("to".into(), lower_expr(e))),
+                    EffectField::Url(e) => Some(("url".into(), lower_expr(e))),
+                    EffectField::Event(e) => {
+                        Some(("event".into(), ExprIr::Literal { value: e.clone() }))
+                    }
+                    EffectField::Task(t) => {
+                        Some(("task".into(), ExprIr::Literal { value: t.clone() }))
+                    }
+                    EffectField::Data(_) => None,
+                })
+                .collect();
+            Instruction::EmitEffect { kind, fields }
+        })
+        .collect();
 
-    let return_binding = saga.on_success.return_stmt.body.as_ref().and_then(|b| match b {
-        ReturnBody::Binding(name) => Some(name.clone()),
-        _ => None,
-    });
+    let return_binding = saga
+        .on_success
+        .return_stmt
+        .body
+        .as_ref()
+        .and_then(|b| match b {
+            ReturnBody::Binding(name) => Some(name.clone()),
+            _ => None,
+        });
 
     SagaPlan {
         name: saga.name.clone(),
@@ -1233,10 +1637,17 @@ impl std::fmt::Display for SagaPlan {
 fn generate_migration(m: &MigrateDef, sources: &[&SourceDef]) -> String {
     let source = sources.iter().find(|s| s.shape == m.shape);
     let table = source.map(|s| s.name.as_str()).unwrap_or(&m.shape);
-    let dialect = source.map(|s| source_dialect(s)).unwrap_or(SqlDialect::Postgres);
+    let dialect = source
+        .map(|s| source_dialect(s))
+        .unwrap_or(SqlDialect::Postgres);
 
     let mut ddl = String::new();
-    writeln!(ddl, "-- MIGRATE {} {} -> {}", m.shape, m.from_version, m.to_version).unwrap();
+    writeln!(
+        ddl,
+        "-- MIGRATE {} {} -> {}",
+        m.shape, m.from_version, m.to_version
+    )
+    .unwrap();
     writeln!(ddl, "BEGIN;").unwrap();
 
     for op in &m.ops {
@@ -1247,11 +1658,23 @@ fn generate_migration(m: &MigrateDef, sources: &[&SourceDef]) -> String {
             }
             MigrateOp::Add(field) => {
                 let ty = sql_type(&field.ty, dialect).replace("{col}", &field.name);
-                let nullable = !field.modifiers.iter().any(|m| matches!(m, Modifier::Required));
+                let nullable = !field
+                    .modifiers
+                    .iter()
+                    .any(|m| matches!(m, Modifier::Required));
                 let default = field.modifiers.iter().find_map(|m| {
-                    if let Modifier::Default(v) = m { Some(sql_literal(v, dialect)) } else { None }
+                    if let Modifier::Default(v) = m {
+                        Some(sql_literal(v, dialect))
+                    } else {
+                        None
+                    }
                 });
-                write!(ddl, "ALTER TABLE {} ADD COLUMN {} {}", table, field.name, ty).unwrap();
+                write!(
+                    ddl,
+                    "ALTER TABLE {} ADD COLUMN {} {}",
+                    table, field.name, ty
+                )
+                .unwrap();
                 if !nullable {
                     write!(ddl, " NOT NULL").unwrap();
                 }
@@ -1261,10 +1684,20 @@ fn generate_migration(m: &MigrateDef, sources: &[&SourceDef]) -> String {
                 writeln!(ddl, ";").unwrap();
             }
             MigrateOp::Rename { from, to } => {
-                writeln!(ddl, "ALTER TABLE {} RENAME COLUMN {} TO {};", table, from, to).unwrap();
+                writeln!(
+                    ddl,
+                    "ALTER TABLE {} RENAME COLUMN {} TO {};",
+                    table, from, to
+                )
+                .unwrap();
             }
             MigrateOp::Compute { field, .. } => {
-                writeln!(ddl, "-- COMPUTE {} requires backfill (handled by runtime)", field).unwrap();
+                writeln!(
+                    ddl,
+                    "-- COMPUTE {} requires backfill (handled by runtime)",
+                    field
+                )
+                .unwrap();
             }
         }
     }
@@ -1279,56 +1712,64 @@ fn generate_surface(
 ) -> SurfaceSpec {
     let base = surface.base_path.as_deref().unwrap_or("");
 
-    let routes: Vec<SurfaceRoute> = surface.routes.iter().map(|r| {
-        let method = match r.method {
-            HttpMethod::Get => "GET",
-            HttpMethod::Post => "POST",
-            HttpMethod::Put => "PUT",
-            HttpMethod::Patch => "PATCH",
-            HttpMethod::Delete => "DELETE",
-            HttpMethod::Webhook => "POST",
-        };
-        SurfaceRoute {
-            method: method.into(),
-            path: format!("{}{}", base, r.path),
-            operation_id: r.target.clone(),
-        }
-    }).collect();
+    let routes: Vec<SurfaceRoute> = surface
+        .routes
+        .iter()
+        .map(|r| {
+            let method = match r.method {
+                HttpMethod::Get => "GET",
+                HttpMethod::Post => "POST",
+                HttpMethod::Put => "PUT",
+                HttpMethod::Patch => "PATCH",
+                HttpMethod::Delete => "DELETE",
+                HttpMethod::Webhook => "POST",
+            };
+            SurfaceRoute {
+                method: method.into(),
+                path: format!("{}{}", base, r.path),
+                operation_id: r.target.clone(),
+            }
+        })
+        .collect();
 
-    let schemas: Vec<SchemaSpec> = surface.exposes.iter().map(|expose| {
-        let mut fields = Vec::new();
-        let mut hidden = Vec::new();
-        let mut renames = Vec::new();
+    let schemas: Vec<SchemaSpec> = surface
+        .exposes
+        .iter()
+        .map(|expose| {
+            let mut fields = Vec::new();
+            let mut hidden = Vec::new();
+            let mut renames = Vec::new();
 
-        for ef in &expose.fields {
-            match ef {
-                ExposeField::Field { name, ty } => {
-                    let (oapi_type, oapi_format) = openapi_type(ty);
-                    let nullable = matches!(ty, TypeExpr::Maybe(_));
-                    fields.push(SchemaField {
-                        name: name.clone(),
-                        ty: oapi_type,
-                        format: oapi_format,
-                        nullable,
-                    });
-                }
-                ExposeField::Hide(name) => {
-                    hidden.push(name.clone());
-                }
-                ExposeField::Rename { from, to } => {
-                    renames.push((from.clone(), to.clone()));
+            for ef in &expose.fields {
+                match ef {
+                    ExposeField::Field { name, ty } => {
+                        let (oapi_type, oapi_format) = openapi_type(ty);
+                        let nullable = matches!(ty, TypeExpr::Maybe(_));
+                        fields.push(SchemaField {
+                            name: name.clone(),
+                            ty: oapi_type,
+                            format: oapi_format,
+                            nullable,
+                        });
+                    }
+                    ExposeField::Hide(name) => {
+                        hidden.push(name.clone());
+                    }
+                    ExposeField::Rename { from, to } => {
+                        renames.push((from.clone(), to.clone()));
+                    }
                 }
             }
-        }
 
-        SchemaSpec {
-            name: expose.alias.as_ref().unwrap_or(&expose.shape).clone(),
-            source_shape: expose.shape.clone(),
-            fields,
-            hidden,
-            renames,
-        }
-    }).collect();
+            SchemaSpec {
+                name: expose.alias.as_ref().unwrap_or(&expose.shape).clone(),
+                source_shape: expose.shape.clone(),
+                fields,
+                hidden,
+                renames,
+            }
+        })
+        .collect();
 
     let deprecation = surface.deprecate.as_ref().map(|d| DeprecationSpec {
         replaces: d.version.clone(),
@@ -1401,15 +1842,23 @@ impl std::fmt::Display for SurfaceSpec {
             writeln!(f, "      \"{}\": {{", schema.name)?;
             writeln!(f, "        \"type\": \"object\",")?;
             writeln!(f, "        \"properties\": {{")?;
-            let visible: Vec<&SchemaField> = schema.fields.iter()
+            let visible: Vec<&SchemaField> = schema
+                .fields
+                .iter()
                 .filter(|sf| !schema.hidden.contains(&sf.name))
                 .collect();
             for (j, field) in visible.iter().enumerate() {
-                let display_name = schema.renames.iter()
+                let display_name = schema
+                    .renames
+                    .iter()
                     .find(|(from, _)| from == &field.name)
                     .map(|(_, to)| to.as_str())
                     .unwrap_or(&field.name);
-                write!(f, "          \"{}\": {{ \"type\": \"{}\"", display_name, field.ty)?;
+                write!(
+                    f,
+                    "          \"{}\": {{ \"type\": \"{}\"",
+                    display_name, field.ty
+                )?;
                 if let Some(ref fmt_str) = field.format {
                     write!(f, ", \"format\": \"{}\"", fmt_str)?;
                 }
@@ -1452,7 +1901,8 @@ fn generate_stream(stream: &StreamDef) -> StreamSpec {
     let transport = match stream.transport {
         StreamTransport::WebSocket => "websocket",
         StreamTransport::Sse => "sse",
-    }.into();
+    }
+    .into();
 
     let auth = stream.auth.as_ref().map(|a| match a {
         AuthDecl::None => "none".into(),
@@ -1464,15 +1914,21 @@ fn generate_stream(stream: &StreamDef) -> StreamSpec {
         AuthDecl::WebhookSignature { .. } => "webhook_signature".into(),
     });
 
-    let events = stream.events.iter().map(|evt| {
-        let fields = evt.fields.iter().map(|f| {
-            (f.name.clone(), format_type_short(&f.ty))
-        }).collect();
-        StreamEventSpec {
-            name: evt.name.clone(),
-            fields,
-        }
-    }).collect();
+    let events = stream
+        .events
+        .iter()
+        .map(|evt| {
+            let fields = evt
+                .fields
+                .iter()
+                .map(|f| (f.name.clone(), format_type_short(&f.ty)))
+                .collect();
+            StreamEventSpec {
+                name: evt.name.clone(),
+                fields,
+            }
+        })
+        .collect();
 
     StreamSpec {
         name: stream.name.clone(),
@@ -1539,7 +1995,8 @@ mod tests {
 
     #[test]
     fn test_sql_simple_table() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   email STRING 255 REQUIRED UNIQUE
   name STRING 100 REQUIRED
@@ -1548,18 +2005,32 @@ SOURCE users POSTGRES
   SHAPE User
   INDEX email UNIQUE
   INDEX id
-"#);
+"#,
+        );
         assert!(result.sql.contains("CREATE TABLE IF NOT EXISTS users"));
-        assert!(result.sql.contains("id UUID PRIMARY KEY DEFAULT gen_random_uuid()"));
+        assert!(
+            result
+                .sql
+                .contains("id UUID PRIMARY KEY DEFAULT gen_random_uuid()")
+        );
         assert!(result.sql.contains("email VARCHAR(255) NOT NULL UNIQUE"));
         assert!(result.sql.contains("name VARCHAR(100) NOT NULL"));
-        assert!(result.sql.contains("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email"));
-        assert!(result.sql.contains("CREATE INDEX IF NOT EXISTS idx_users_id"));
+        assert!(
+            result
+                .sql
+                .contains("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email")
+        );
+        assert!(
+            result
+                .sql
+                .contains("CREATE INDEX IF NOT EXISTS idx_users_id")
+        );
     }
 
     #[test]
     fn test_sql_with_constraints() {
-        let result = codegen(r#"SHAPE Booking
+        let result = codegen(
+            r#"SHAPE Booking
   id UUID PK AUTO
   guest_count INT MIN 1 MAX 16 DEFAULT 1
   price DECIMAL PRECISION 10 SCALE 2 REQUIRED
@@ -1569,7 +2040,8 @@ SOURCE users POSTGRES
 SOURCE bookings POSTGRES
   SHAPE Booking
   INDEX status
-"#);
+"#,
+        );
         assert!(result.sql.contains("guest_count INTEGER"));
         assert!(result.sql.contains("CHECK (guest_count >= 1)"));
         assert!(result.sql.contains("CHECK (guest_count <= 16)"));
@@ -1580,7 +2052,8 @@ SOURCE bookings POSTGRES
 
     #[test]
     fn test_route_generation() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1595,7 +2068,8 @@ FLOW get_user get /users/:id
       FILTER id EQ path.id
     OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         assert_eq!(result.routes.len(), 1);
         let route = &result.routes[0];
         assert_eq!(route.name, "get_user");
@@ -1605,12 +2079,15 @@ FLOW get_user get /users/:id
         assert_eq!(route.return_code, 200);
         assert_eq!(route.return_binding.as_deref(), Some("user"));
         assert_eq!(route.instructions.len(), 1);
-        assert!(matches!(&route.instructions[0], Instruction::FetchOne { source, .. } if source == "users"));
+        assert!(
+            matches!(&route.instructions[0], Instruction::FetchOne { source, .. } if source == "users")
+        );
     }
 
     #[test]
     fn test_route_with_insert() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1626,11 +2103,14 @@ FLOW create_user post /users
     name body.name
   AS user
   RETURN 201 user
-"#);
+"#,
+        );
         let route = &result.routes[0];
         assert_eq!(route.method, "POST");
-        assert!(matches!(&route.instructions[0], Instruction::Insert { source, binding, .. }
-            if source == "users" && binding.as_deref() == Some("user")));
+        assert!(
+            matches!(&route.instructions[0], Instruction::Insert { source, binding, .. }
+            if source == "users" && binding.as_deref() == Some("user"))
+        );
     }
 
     #[test]
@@ -1648,7 +2128,8 @@ FLOW create_user post /users
 
     #[test]
     fn test_migrate_ddl() {
-        let result = codegen(r#"SHAPE Order
+        let result = codegen(
+            r#"SHAPE Order
   id UUID PK AUTO
   status STRING 20 REQUIRED
 
@@ -1662,7 +2143,8 @@ MIGRATE Order v1 TO v2
   ADD shipped_at MAYBE TIMESTAMP
   DROP old_field
   RENAME status TO order_status
-"#);
+"#,
+        );
         assert_eq!(result.migrations.len(), 1);
         let ddl = &result.migrations[0];
         assert!(ddl.contains("ALTER TABLE orders ADD COLUMN tracking_number"));
@@ -1675,7 +2157,8 @@ MIGRATE Order v1 TO v2
 
     #[test]
     fn test_surface_basic() {
-        let result = codegen(r#"SHAPE Booking
+        let result = codegen(
+            r#"SHAPE Booking
   id UUID PK AUTO
   status STRING 20 REQUIRED
   check_in DATE REQUIRED
@@ -1713,7 +2196,8 @@ SURFACE public v1
     FIELD check_out DATE
     HIDE total_price
     HIDE user_id
-"#);
+"#,
+        );
         assert_eq!(result.surfaces.len(), 1);
         let s = &result.surfaces[0];
         assert_eq!(s.name, "public");
@@ -1734,7 +2218,8 @@ SURFACE public v1
 
     #[test]
     fn test_surface_openapi_output() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1756,7 +2241,8 @@ SURFACE api v2
   EXPOSE User AS UserResponse
     FIELD id UUID
     FIELD name STRING
-"#);
+"#,
+        );
         let s = &result.surfaces[0];
         let output = format!("{s}");
         assert!(output.contains("\"openapi\": \"3.1.0\""));
@@ -1771,7 +2257,8 @@ SURFACE api v2
 
     #[test]
     fn test_surface_with_deprecation() {
-        let result = codegen(r#"SHAPE Item
+        let result = codegen(
+            r#"SHAPE Item
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1793,7 +2280,8 @@ SURFACE shop v2
     FIELD id UUID
     FIELD name STRING
   DEPRECATE v1 SUNSET "2027-06-01"
-"#);
+"#,
+        );
         let s = &result.surfaces[0];
         assert!(s.deprecation.is_some());
         let dep = s.deprecation.as_ref().unwrap();
@@ -1807,7 +2295,8 @@ SURFACE shop v2
 
     #[test]
     fn test_surface_rename_fields() {
-        let result = codegen(r#"SHAPE Booking
+        let result = codegen(
+            r#"SHAPE Booking
   id UUID PK AUTO
   note STRING 500
 
@@ -1830,9 +2319,13 @@ SURFACE public v2
     FIELD id UUID
     FIELD note STRING
     RENAME note AS special_requests
-"#);
+"#,
+        );
         let s = &result.surfaces[0];
-        assert_eq!(s.schemas[0].renames, vec![("note".to_string(), "special_requests".to_string())]);
+        assert_eq!(
+            s.schemas[0].renames,
+            vec![("note".to_string(), "special_requests".to_string())]
+        );
         let output = format!("{s}");
         assert!(output.contains("\"special_requests\""));
         assert!(!output.contains("\"note\""));
@@ -1840,7 +2333,8 @@ SURFACE public v2
 
     #[test]
     fn test_saga_codegen() {
-        let result = codegen(r#"SHAPE Item
+        let result = codegen(
+            r#"SHAPE Item
   id UUID PK AUTO
   quantity INT REQUIRED
 
@@ -1896,7 +2390,8 @@ SAGA process_order POST /orders
       TO auth.user_id
       DATA order
     RETURN 201 order
-"#);
+"#,
+        );
         assert_eq!(result.sagas.len(), 1);
         let saga = &result.sagas[0];
         assert_eq!(saga.name, "process_order");
@@ -1929,7 +2424,8 @@ SAGA process_order POST /orders
 
     #[test]
     fn test_match_codegen() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   role ENUM admin user REQUIRED
 
@@ -1963,12 +2459,20 @@ FLOW get_user GET /users/:id
           FILTER id EQ path.id
         OR 404
   RETURN 200 user
-"#);
+"#,
+        );
         assert_eq!(result.routes.len(), 1);
         let route = &result.routes[0];
-        let has_match = route.instructions.iter().any(|i| matches!(i, Instruction::Match { .. }));
+        let has_match = route
+            .instructions
+            .iter()
+            .any(|i| matches!(i, Instruction::Match { .. }));
         assert!(has_match, "route should contain a MATCH instruction");
-        if let Some(Instruction::Match { branches, default }) = route.instructions.iter().find(|i| matches!(i, Instruction::Match { .. })) {
+        if let Some(Instruction::Match { branches, default }) = route
+            .instructions
+            .iter()
+            .find(|i| matches!(i, Instruction::Match { .. }))
+        {
             assert_eq!(branches.len(), 1);
             assert!(!branches[0].instructions.is_empty());
             assert!(default.is_some());
@@ -1977,7 +2481,8 @@ FLOW get_user GET /users/:id
 
     #[test]
     fn test_stream_codegen() {
-        let result = codegen(r#"SHAPE User
+        let result = codegen(
+            r#"SHAPE User
   id UUID PK AUTO
   name STRING 100 REQUIRED
 
@@ -1993,7 +2498,8 @@ STREAM notifications ws /ws/notifications
   EVENT message
     from UUID
     body STRING 500
-"#);
+"#,
+        );
         assert_eq!(result.streams.len(), 1);
         let s = &result.streams[0];
         assert_eq!(s.name, "notifications");
@@ -2004,5 +2510,37 @@ STREAM notifications ws /ws/notifications
         assert_eq!(s.events[0].name, "user_online");
         assert_eq!(s.events[0].fields.len(), 2);
         assert_eq!(s.events[1].name, "message");
+    }
+
+    #[test]
+    fn test_messenger_primitives_lower_to_atomic_instructions() {
+        let result = codegen(include_str!("../../examples/messenger-primitives.axis"));
+        let route = result
+            .routes
+            .iter()
+            .find(|route| route.name == "deliver_message")
+            .unwrap();
+        assert!(
+            route
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::Upsert { .. }))
+        );
+        assert!(
+            route
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::Fanout { .. }))
+        );
+        assert!(
+            result
+                .sql
+                .contains("CREATE TABLE IF NOT EXISTS _axis_idempotency")
+        );
+        assert!(
+            result
+                .sql
+                .contains("PRIMARY KEY (flow_name, scope_key, idempotency_key)")
+        );
     }
 }

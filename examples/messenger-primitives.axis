@@ -1,0 +1,50 @@
+SHAPE Receipt
+  id UUID PK
+  user_id UUID REQUIRED
+  message_id UUID REQUIRED
+  status ENUM delivered read REQUIRED
+  updated_at TIMESTAMP REQUIRED
+
+SOURCE receipts SQLITE
+  SHAPE Receipt
+  INDEX id UNIQUE
+  INDEX user_id message_id UNIQUE
+
+SHAPE Delivery
+  recipient_id UUID PK
+  message_id UUID REQUIRED
+  created_at TIMESTAMP REQUIRED
+
+SOURCE deliveries SQLITE
+  SHAPE Delivery
+  INDEX recipient_id UNIQUE
+  INDEX message_id
+
+FLOW deliver_message post /messages/:id/deliver
+  HEADER idempotency_key STRING 255 REQUIRED
+  BODY DeliveryRequest
+    user_id UUID REQUIRED
+    receipt_id UUID REQUIRED
+    recipients LIST UUID REQUIRED
+  IDEMPOTENCY header.idempotency_key SCOPE body.user_id TTL 86400
+  UPSERT receipts
+    KEY id body.receipt_id
+    SET user_id body.user_id
+    SET message_id path.id
+    SET status "delivered"
+    SET updated_at NOW
+  AS receipt
+  FANOUT recipient IN body.recipients
+    INSERT deliveries
+      recipient_id recipient
+      message_id path.id
+      created_at NOW
+  RETURN 201 receipt
+    HEADER X-Axis-Operation header.idempotency_key
+
+POLICY reliable_delivery
+  APPLIES_TO FLOW ALL
+    METHOD IN post
+    NOT PATH STARTS_WITH "/internal"
+  REQUIRE IDEMPOTENCY
+  REQUIRE FANOUT

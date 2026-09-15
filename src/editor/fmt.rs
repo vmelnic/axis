@@ -53,11 +53,18 @@ fn format_type(ty: &TypeExpr) -> String {
         TypeExpr::String(Some(n)) => format!("STRING {}", n),
         TypeExpr::Int { min, max } => {
             let mut s = "INT".to_string();
-            if let Some(v) = min { write!(s, " MIN {}", v).unwrap(); }
-            if let Some(v) = max { write!(s, " MAX {}", v).unwrap(); }
+            if let Some(v) = min {
+                write!(s, " MIN {}", v).unwrap();
+            }
+            if let Some(v) = max {
+                write!(s, " MAX {}", v).unwrap();
+            }
             s
         }
-        TypeExpr::Decimal { precision: Some(p), scale: Some(s) } => {
+        TypeExpr::Decimal {
+            precision: Some(p),
+            scale: Some(s),
+        } => {
             format!("DECIMAL PRECISION {} SCALE {}", p, s)
         }
         TypeExpr::Decimal { .. } => "DECIMAL".into(),
@@ -110,8 +117,10 @@ fn format_source(out: &mut String, source: &SourceDef) {
     writeln!(out, "SOURCE {} {}", source.name, stype).unwrap();
     writeln!(out, "  SHAPE {}", source.shape).unwrap();
     for index in &source.indexes {
-        let fields: Vec<String> = index.fields.iter().map(|f| {
-            match &f.suffix {
+        let fields: Vec<String> = index
+            .fields
+            .iter()
+            .map(|f| match &f.suffix {
                 None => f.name.clone(),
                 Some(IndexSuffix::Asc) => format!("{} ASC", f.name),
                 Some(IndexSuffix::Desc) => format!("{} DESC", f.name),
@@ -119,8 +128,8 @@ fn format_source(out: &mut String, source: &SourceDef) {
                 Some(IndexSuffix::Geo) => format!("{} GEO", f.name),
                 Some(IndexSuffix::Text) => format!("{} TEXT", f.name),
                 Some(IndexSuffix::Keyword) => format!("{} KEYWORD", f.name),
-            }
-        }).collect();
+            })
+            .collect();
         writeln!(out, "  INDEX {}", fields.join(" ")).unwrap();
     }
     if let Some(ttl) = source.ttl {
@@ -150,15 +159,13 @@ fn format_policy(out: &mut String, policy: &PolicyDef) {
     if policy.applies_to.filters.is_empty() {
         writeln!(out, "  APPLIES_TO FLOW").unwrap();
     } else {
+        let mode = match policy.applies_to.mode {
+            PolicyMatchMode::All => "ALL",
+            PolicyMatchMode::Any => "ANY",
+        };
+        writeln!(out, "  APPLIES_TO FLOW {}", mode).unwrap();
         for filter in &policy.applies_to.filters {
-            match filter {
-                PolicyFilter::MethodIn(methods) => {
-                    writeln!(out, "  APPLIES_TO FLOW WHERE METHOD IN {}", methods.join(" ")).unwrap();
-                }
-                PolicyFilter::Reads(s) => writeln!(out, "  APPLIES_TO FLOW WHERE READS {}", s).unwrap(),
-                PolicyFilter::Writes(s) => writeln!(out, "  APPLIES_TO FLOW WHERE WRITES {}", s).unwrap(),
-                PolicyFilter::PathStartsWith(s) => writeln!(out, "  APPLIES_TO FLOW WHERE PATH STARTS_WITH {}", s).unwrap(),
-            }
+            writeln!(out, "    {}", format_policy_filter(filter)).unwrap();
         }
     }
     for req in &policy.requires {
@@ -169,24 +176,51 @@ fn format_policy(out: &mut String, policy: &PolicyDef) {
             RequireClause::Scope => writeln!(out, "  REQUIRE SCOPE").unwrap(),
             RequireClause::Rule(name) => writeln!(out, "  REQUIRE RULE {}", name).unwrap(),
             RequireClause::Guard(name) => writeln!(out, "  REQUIRE GUARD {}", name).unwrap(),
+            RequireClause::Idempotency => writeln!(out, "  REQUIRE IDEMPOTENCY").unwrap(),
+            RequireClause::Fanout => writeln!(out, "  REQUIRE FANOUT").unwrap(),
         }
+    }
+}
+
+fn format_policy_filter(filter: &PolicyFilter) -> String {
+    match filter {
+        PolicyFilter::MethodIn(methods) => format!("METHOD IN {}", methods.join(" ")),
+        PolicyFilter::Reads(source) => format!("READS {source}"),
+        PolicyFilter::Writes(source) => format!("WRITES {source}"),
+        PolicyFilter::PathStartsWith(path) => format!("PATH STARTS_WITH \"{path}\""),
+        PolicyFilter::Not(inner) => format!("NOT {}", format_policy_filter(inner)),
     }
 }
 
 fn format_service(out: &mut String, service: &ServiceDef) {
     writeln!(out, "SERVICE {}", service.name).unwrap();
     writeln!(out, "  ENDPOINT {}", service.endpoint).unwrap();
-    writeln!(out, "  AUTH {} VAULT {}", service.auth_type, service.vault_key).unwrap();
+    writeln!(
+        out,
+        "  AUTH {} VAULT {}",
+        service.auth_type, service.vault_key
+    )
+    .unwrap();
     for method in &service.methods {
         writeln!(out, "  METHOD {}", method.name).unwrap();
+        if method.pure {
+            writeln!(out, "    PURE").unwrap();
+        }
+        if let Some(input) = &method.idempotency_input {
+            writeln!(out, "    IDEMPOTENCY {input}").unwrap();
+        }
         if !method.inputs.is_empty() {
-            let pairs: Vec<String> = method.inputs.iter()
+            let pairs: Vec<String> = method
+                .inputs
+                .iter()
                 .map(|(name, ty)| format!("{} {}", name, format_type(ty)))
                 .collect();
             writeln!(out, "    INPUT {}", pairs.join(" ")).unwrap();
         }
         if !method.outputs.is_empty() {
-            let pairs: Vec<String> = method.outputs.iter()
+            let pairs: Vec<String> = method
+                .outputs
+                .iter()
                 .map(|(name, ty)| format!("{} {}", name, format_type(ty)))
                 .collect();
             writeln!(out, "    OUTPUT {}", pairs.join(" ")).unwrap();
@@ -302,6 +336,17 @@ fn format_flow(out: &mut String, flow: &FlowDef) {
         writeln!(out).unwrap();
     }
 
+    if let Some(idempotency) = &flow.idempotency {
+        writeln!(
+            out,
+            "  IDEMPOTENCY {} SCOPE {} TTL {}",
+            idempotency.key.as_str(),
+            idempotency.scope.as_str(),
+            idempotency.ttl
+        )
+        .unwrap();
+    }
+
     for step in &flow.steps {
         format_step(out, step, 2);
     }
@@ -315,8 +360,15 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
         FlowStep::Rule(rule) => {
             writeln!(out, "{}RULE {}", pad, rule.name).unwrap();
             for req in &rule.requires {
-                writeln!(out, "{}  REQUIRE {} {} {}", pad, req.path.as_str(),
-                    format_compare_op(&req.op), format_expr(&req.value)).unwrap();
+                writeln!(
+                    out,
+                    "{}  REQUIRE {} {} {}",
+                    pad,
+                    req.path.as_str(),
+                    format_compare_op(&req.op),
+                    format_expr(&req.value)
+                )
+                .unwrap();
             }
         }
         FlowStep::Guard(guard) => {
@@ -340,11 +392,37 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
                 writeln!(out, "{}AS {}", pad, binding).unwrap();
             }
         }
+        FlowStep::Upsert(upsert) => {
+            writeln!(out, "{}UPSERT {}", pad, upsert.source).unwrap();
+            for (field, value) in &upsert.keys {
+                writeln!(out, "{}  KEY {} {}", pad, field, format_expr(value)).unwrap();
+            }
+            for set in &upsert.sets {
+                writeln!(
+                    out,
+                    "{}  SET {} {}",
+                    pad,
+                    set.field,
+                    format_expr(&set.value)
+                )
+                .unwrap();
+            }
+            if let Some(binding) = &upsert.binding {
+                writeln!(out, "{}AS {}", pad, binding).unwrap();
+            }
+        }
         FlowStep::Update(update) => {
             writeln!(out, "{}UPDATE {}", pad, update.source).unwrap();
             for w in &update.wheres {
-                writeln!(out, "{}  WHERE {} {} {}", pad, w.field,
-                    format_compare_op(&w.op), format_expr(&w.value)).unwrap();
+                writeln!(
+                    out,
+                    "{}  WHERE {} {} {}",
+                    pad,
+                    w.field,
+                    format_compare_op(&w.op),
+                    format_expr(&w.value)
+                )
+                .unwrap();
             }
             for s in &update.sets {
                 writeln!(out, "{}  SET {} {}", pad, s.field, format_expr(&s.value)).unwrap();
@@ -360,8 +438,15 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
         FlowStep::Delete(delete) => {
             writeln!(out, "{}DELETE {}", pad, delete.source).unwrap();
             for w in &delete.wheres {
-                writeln!(out, "{}  WHERE {} {} {}", pad, w.field,
-                    format_compare_op(&w.op), format_expr(&w.value)).unwrap();
+                writeln!(
+                    out,
+                    "{}  WHERE {} {} {}",
+                    pad,
+                    w.field,
+                    format_compare_op(&w.op),
+                    format_expr(&w.value)
+                )
+                .unwrap();
             }
             if delete.or_code != 0 || delete.or_message.is_some() {
                 write!(out, "{}OR {}", pad, delete.or_code).unwrap();
@@ -387,7 +472,9 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
                         let parts: Vec<String> = exprs.iter().map(format_expr).collect();
                         writeln!(out, "{}  DATA {}", pad, parts.join(" ")).unwrap();
                     }
-                    EffectField::Url(e) => writeln!(out, "{}  URL {}", pad, format_expr(e)).unwrap(),
+                    EffectField::Url(e) => {
+                        writeln!(out, "{}  URL {}", pad, format_expr(e)).unwrap()
+                    }
                     EffectField::Event(e) => writeln!(out, "{}  EVENT {}", pad, e).unwrap(),
                     EffectField::Task(t) => writeln!(out, "{}  TASK {}", pad, t).unwrap(),
                 }
@@ -412,7 +499,14 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
             writeln!(out, "{}SET {} {}", pad, set.name, format_expr(&set.expr)).unwrap();
         }
         FlowStep::Each(each) => {
-            write!(out, "{}EACH {} IN {}", pad, each.binding, format_expr(&each.source)).unwrap();
+            write!(
+                out,
+                "{}EACH {} IN {}",
+                pad,
+                each.binding,
+                format_expr(&each.source)
+            )
+            .unwrap();
             if let Some(n) = each.parallel {
                 write!(out, " PARALLEL {}", n).unwrap();
             }
@@ -420,6 +514,17 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
             for s in &each.steps {
                 format_step(out, s, indent + 2);
             }
+        }
+        FlowStep::Fanout(fanout) => {
+            writeln!(
+                out,
+                "{}FANOUT {} IN {}",
+                pad,
+                fanout.binding,
+                format_expr(&fanout.source)
+            )
+            .unwrap();
+            format_step(out, &FlowStep::Insert(fanout.insert.clone()), indent + 2);
         }
         FlowStep::Try(try_step) => {
             writeln!(out, "{}TRY", pad).unwrap();
@@ -432,7 +537,15 @@ fn format_step(out: &mut String, step: &FlowStep, indent: usize) {
             }
         }
         FlowStep::Upload(upload) => {
-            writeln!(out, "{}UPLOAD {} -> {} AS {}", pad, format_expr(&upload.file_expr), upload.storage, upload.binding).unwrap();
+            writeln!(
+                out,
+                "{}UPLOAD {} -> {} AS {}",
+                pad,
+                format_expr(&upload.file_expr),
+                upload.storage,
+                upload.binding
+            )
+            .unwrap();
         }
     }
 }
@@ -445,11 +558,26 @@ fn format_guard_expr(out: &mut String, expr: &Expr, indent: usize) {
                 writeln!(out, "{}{}", pad, format_unary_op(op)).unwrap();
                 format_block_expr(out, operand, indent + 2);
             } else {
-                writeln!(out, "{}{} {}", pad, format_unary_op(op), format_expr(operand)).unwrap();
+                writeln!(
+                    out,
+                    "{}{} {}",
+                    pad,
+                    format_unary_op(op),
+                    format_expr(operand)
+                )
+                .unwrap();
             }
         }
         Expr::Binary { op, left, right } => {
-            writeln!(out, "{}{} {} {}", pad, format_binary_op(op), format_expr(left), format_expr(right)).unwrap();
+            writeln!(
+                out,
+                "{}{} {} {}",
+                pad,
+                format_binary_op(op),
+                format_expr(left),
+                format_expr(right)
+            )
+            .unwrap();
         }
         _ => {
             if is_block_expr(expr) {
@@ -462,17 +590,34 @@ fn format_guard_expr(out: &mut String, expr: &Expr, indent: usize) {
 }
 
 fn is_block_expr(expr: &Expr) -> bool {
-    matches!(expr, Expr::Fetch { .. } | Expr::Query { .. } | Expr::Call { .. } | Expr::Cached { .. })
+    matches!(
+        expr,
+        Expr::Fetch { .. } | Expr::Query { .. } | Expr::Call { .. } | Expr::Cached { .. }
+    )
 }
 
 fn format_block_expr(out: &mut String, expr: &Expr, indent: usize) {
     let pad = " ".repeat(indent);
     match expr {
-        Expr::Fetch { source, filters, with, or_code, or_message, or_shape } => {
+        Expr::Fetch {
+            source,
+            filters,
+            with,
+            or_code,
+            or_message,
+            or_shape,
+        } => {
             writeln!(out, "{}FETCH {}", pad, source).unwrap();
             for f in filters {
-                writeln!(out, "{}  FILTER {} {} {}", pad, f.field,
-                    format_filter_op(&f.op), format_expr(&f.value)).unwrap();
+                writeln!(
+                    out,
+                    "{}  FILTER {} {} {}",
+                    pad,
+                    f.field,
+                    format_filter_op(&f.op),
+                    format_expr(&f.value)
+                )
+                .unwrap();
             }
             for w in with {
                 writeln!(out, "{}  WITH {}", pad, w).unwrap();
@@ -490,11 +635,25 @@ fn format_block_expr(out: &mut String, expr: &Expr, indent: usize) {
                 writeln!(out).unwrap();
             }
         }
-        Expr::Query { source, filters, sorts, cursor: _, page_size, cache_ttl: _ } => {
+        Expr::Query {
+            source,
+            filters,
+            sorts,
+            cursor: _,
+            page_size,
+            cache_ttl: _,
+        } => {
             writeln!(out, "{}QUERY {}", pad, source).unwrap();
             for f in filters {
-                writeln!(out, "{}  FILTER {} {} {}", pad, f.field,
-                    format_filter_op(&f.op), format_expr(&f.value)).unwrap();
+                writeln!(
+                    out,
+                    "{}  FILTER {} {} {}",
+                    pad,
+                    f.field,
+                    format_filter_op(&f.op),
+                    format_expr(&f.value)
+                )
+                .unwrap();
             }
             for s in sorts {
                 let dir = match s.direction {
@@ -507,7 +666,13 @@ fn format_block_expr(out: &mut String, expr: &Expr, indent: usize) {
                 writeln!(out, "{}  PAGE_SIZE {}", pad, format_expr(ps)).unwrap();
             }
         }
-        Expr::Call { service, method, args, or_code, or_message } => {
+        Expr::Call {
+            service,
+            method,
+            args,
+            or_code,
+            or_message,
+        } => {
             writeln!(out, "{}CALL {}.{}", pad, service, method).unwrap();
             if !args.is_empty() {
                 for (name, value) in args {
@@ -540,7 +705,12 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Literal(val) => format_literal(val),
         Expr::DotPath(path) => path.as_str(),
         Expr::Binary { op, left, right } => {
-            format!("{} {} {}", format_binary_op(op), format_expr(left), format_expr(right))
+            format!(
+                "{} {} {}",
+                format_binary_op(op),
+                format_expr(left),
+                format_expr(right)
+            )
         }
         Expr::Unary { op, operand } => {
             format!("{} {}", format_unary_op(op), format_expr(operand))
@@ -550,10 +720,21 @@ fn format_expr(expr: &Expr) -> String {
                 TernaryOp::Between => "BETWEEN",
                 TernaryOp::Substring => "SUBSTRING",
             };
-            format!("{} {} {} {}", name, format_expr(a), format_expr(b), format_expr(c))
+            format!(
+                "{} {} {} {}",
+                name,
+                format_expr(a),
+                format_expr(b),
+                format_expr(c)
+            )
         }
         Expr::If { cond, then, else_ } => {
-            format!("IF {} THEN {} ELSE {}", format_expr(cond), format_expr(then), format_expr(else_))
+            format!(
+                "IF {} THEN {} ELSE {}",
+                format_expr(cond),
+                format_expr(then),
+                format_expr(else_)
+            )
         }
         Expr::Aggregate { op, source, field } => {
             let name = match op {
@@ -571,7 +752,11 @@ fn format_expr(expr: &Expr) -> String {
             }
             s
         }
-        Expr::NowOffset { direction, amount, unit } => {
+        Expr::NowOffset {
+            direction,
+            amount,
+            unit,
+        } => {
             let dir = match direction {
                 OffsetDirection::Plus => "NOW_PLUS",
                 OffsetDirection::Minus => "NOW_MINUS",
@@ -590,10 +775,11 @@ fn format_expr(expr: &Expr) -> String {
         Expr::Coalesce { value, default } => {
             format!("COALESCE {} {}", format_expr(value), format_expr(default))
         }
-        Expr::Fetch { .. } | Expr::Query { .. } | Expr::Call { .. } | Expr::Cached { .. }
-        | Expr::WasmCall { .. } => {
-            "<block>".into()
-        }
+        Expr::Fetch { .. }
+        | Expr::Query { .. }
+        | Expr::Call { .. }
+        | Expr::Cached { .. }
+        | Expr::WasmCall { .. } => "<block>".into(),
         Expr::MapExpr { source, fields } => {
             format!("MAP {} SELECT {}", format_expr(source), fields.join(" "))
         }
@@ -616,18 +802,29 @@ fn format_expr(expr: &Expr) -> String {
             format!("SPLIT {} {}", format_expr(value), format_expr(delimiter))
         }
         Expr::ReplaceExpr { value, from, to } => {
-            format!("REPLACE {} {} {}", format_expr(value), format_expr(from), format_expr(to))
+            format!(
+                "REPLACE {} {} {}",
+                format_expr(value),
+                format_expr(from),
+                format_expr(to)
+            )
         }
         Expr::FormatExpr { template, args } => {
             let arg_strs: Vec<String> = args.iter().map(format_expr).collect();
             format!("FORMAT \"{}\" {}", template, arg_strs.join(" "))
         }
         Expr::Render { template, vars } => {
-            let var_strs: Vec<String> = vars.iter().map(|(k, v)| format!("{} {}", k, format_expr(v))).collect();
+            let var_strs: Vec<String> = vars
+                .iter()
+                .map(|(k, v)| format!("{} {}", k, format_expr(v)))
+                .collect();
             format!("RENDER \"{}\" {}", template, var_strs.join(" "))
         }
         Expr::Translate { key, vars } => {
-            let var_strs: Vec<String> = vars.iter().map(|(k, v)| format!("{} {}", k, format_expr(v))).collect();
+            let var_strs: Vec<String> = vars
+                .iter()
+                .map(|(k, v)| format!("{} {}", k, format_expr(v)))
+                .collect();
             format!("T \"{}\" {}", key, var_strs.join(" "))
         }
         Expr::FuncCall { name, args } => {
@@ -655,21 +852,33 @@ fn format_return_at(out: &mut String, ret: &ReturnStmt, indent: usize) {
             let inner = " ".repeat(indent + 2);
             for field in fields {
                 match &field.value {
-                    ReturnValue::Expr(e) => writeln!(out, "{}{} {}", inner, field.name, format_expr(e)).unwrap(),
+                    ReturnValue::Expr(e) => {
+                        writeln!(out, "{}{} {}", inner, field.name, format_expr(e)).unwrap()
+                    }
                     ReturnValue::Nested(sub) => {
                         writeln!(out, "{}{}", inner, field.name).unwrap();
                         let sub_pad = " ".repeat(indent + 4);
                         for sf in sub {
                             match &sf.value {
-                                ReturnValue::Expr(e) => writeln!(out, "{}{} {}", sub_pad, sf.name, format_expr(e)).unwrap(),
-                                ReturnValue::Nested(_) => writeln!(out, "{}{}", sub_pad, sf.name).unwrap(),
+                                ReturnValue::Expr(e) => {
+                                    writeln!(out, "{}{} {}", sub_pad, sf.name, format_expr(e))
+                                        .unwrap()
+                                }
+                                ReturnValue::Nested(_) => {
+                                    writeln!(out, "{}{}", sub_pad, sf.name).unwrap()
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        Some(ReturnBody::Paginated { items, total, cursor, has_more }) => {
+        Some(ReturnBody::Paginated {
+            items,
+            total,
+            cursor,
+            has_more,
+        }) => {
             writeln!(out, "{}RETURN {}", pad, ret.code).unwrap();
             let inner = " ".repeat(indent + 2);
             writeln!(out, "{}ITEMS {}", inner, format_expr(items)).unwrap();
@@ -773,8 +982,14 @@ fn format_http_method(method: &HttpMethod) -> &'static str {
 }
 
 fn format_saga(out: &mut String, saga: &SagaDef) {
-    writeln!(out, "SAGA {} {} {}", saga.name,
-        format_http_method(&saga.method), saga.path).unwrap();
+    writeln!(
+        out,
+        "SAGA {} {} {}",
+        saga.name,
+        format_http_method(&saga.method),
+        saga.path
+    )
+    .unwrap();
 
     if let Some(ref realm) = saga.realm {
         writeln!(out, "  REALM {}", realm).unwrap();
@@ -800,8 +1015,19 @@ fn format_saga(out: &mut String, saga: &SagaDef) {
         }
         for field in &body.fields {
             let mods: Vec<String> = field.modifiers.iter().map(format_modifier).collect();
-            let mod_str = if mods.is_empty() { String::new() } else { format!(" {}", mods.join(" ")) };
-            writeln!(out, "    {} {}{}", field.name, format_type(&field.ty), mod_str).unwrap();
+            let mod_str = if mods.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", mods.join(" "))
+            };
+            writeln!(
+                out,
+                "    {} {}{}",
+                field.name,
+                format_type(&field.ty),
+                mod_str
+            )
+            .unwrap();
         }
     }
 
@@ -845,7 +1071,14 @@ fn format_surface(out: &mut String, surface: &SurfaceDef) {
         writeln!(out, "  BASE_PATH {}", base_path).unwrap();
     }
     for route in &surface.routes {
-        writeln!(out, "  ROUTE {} {} -> {}", format_http_method(&route.method), route.path, route.target).unwrap();
+        writeln!(
+            out,
+            "  ROUTE {} {} -> {}",
+            format_http_method(&route.method),
+            route.path,
+            route.target
+        )
+        .unwrap();
     }
     for expose in &surface.exposes {
         if let Some(ref alias) = expose.alias {
@@ -855,9 +1088,13 @@ fn format_surface(out: &mut String, surface: &SurfaceDef) {
         }
         for field in &expose.fields {
             match field {
-                ExposeField::Field { name, ty } => writeln!(out, "    FIELD {} {}", name, format_type(ty)).unwrap(),
+                ExposeField::Field { name, ty } => {
+                    writeln!(out, "    FIELD {} {}", name, format_type(ty)).unwrap()
+                }
                 ExposeField::Hide(name) => writeln!(out, "    HIDE {}", name).unwrap(),
-                ExposeField::Rename { from, to } => writeln!(out, "    RENAME {} AS {}", from, to).unwrap(),
+                ExposeField::Rename { from, to } => {
+                    writeln!(out, "    RENAME {} AS {}", from, to).unwrap()
+                }
             }
         }
     }
@@ -867,15 +1104,31 @@ fn format_surface(out: &mut String, surface: &SurfaceDef) {
 }
 
 fn format_migrate(out: &mut String, migrate: &MigrateDef) {
-    writeln!(out, "MIGRATE {} {} TO {}", migrate.shape, migrate.from_version, migrate.to_version).unwrap();
+    writeln!(
+        out,
+        "MIGRATE {} {} TO {}",
+        migrate.shape, migrate.from_version, migrate.to_version
+    )
+    .unwrap();
     for op in &migrate.ops {
         match op {
             MigrateOp::Copy(fields) => writeln!(out, "  COPY {}", fields.join(" ")).unwrap(),
             MigrateOp::Drop(field) => writeln!(out, "  DROP {}", field).unwrap(),
             MigrateOp::Add(field) => {
                 let mods: Vec<String> = field.modifiers.iter().map(format_modifier).collect();
-                let mod_str = if mods.is_empty() { String::new() } else { format!(" {}", mods.join(" ")) };
-                writeln!(out, "  ADD {} {}{}", field.name, format_type(&field.ty), mod_str).unwrap();
+                let mod_str = if mods.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {}", mods.join(" "))
+                };
+                writeln!(
+                    out,
+                    "  ADD {} {}{}",
+                    field.name,
+                    format_type(&field.ty),
+                    mod_str
+                )
+                .unwrap();
             }
             MigrateOp::Rename { from, to } => writeln!(out, "  RENAME {} TO {}", from, to).unwrap(),
             MigrateOp::Compute { field, expr } => {
@@ -891,7 +1144,12 @@ fn format_stream(out: &mut String, stream: &StreamDef) {
         StreamTransport::WebSocket => "WEBSOCKET",
         StreamTransport::Sse => "SSE",
     };
-    writeln!(out, "STREAM {} {} \"{}\"", stream.name, transport, stream.path).unwrap();
+    writeln!(
+        out,
+        "STREAM {} {} \"{}\"",
+        stream.name, transport, stream.path
+    )
+    .unwrap();
     if let Some(ref realm) = stream.realm {
         writeln!(out, "  REALM {}", realm).unwrap();
     }
@@ -912,8 +1170,19 @@ fn format_stream(out: &mut String, stream: &StreamDef) {
         writeln!(out, "  EVENT {}", event.name).unwrap();
         for field in &event.fields {
             let mods: Vec<String> = field.modifiers.iter().map(format_modifier).collect();
-            let mod_str = if mods.is_empty() { String::new() } else { format!(" {}", mods.join(" ")) };
-            writeln!(out, "    {} {}{}", field.name, format_type(&field.ty), mod_str).unwrap();
+            let mod_str = if mods.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", mods.join(" "))
+            };
+            writeln!(
+                out,
+                "    {} {}{}",
+                field.name,
+                format_type(&field.ty),
+                mod_str
+            )
+            .unwrap();
         }
     }
     if !stream.receivers.is_empty() {
@@ -1053,5 +1322,22 @@ FLOW get_user get /users/:id
         let input = std::fs::read_to_string("examples/booking.axis").unwrap();
         let formatted = roundtrip(&input);
         assert!(parse_ok(&formatted), "formatted booking.axis must re-parse");
+    }
+
+    #[test]
+    fn test_messenger_primitives_roundtrip() {
+        let input = std::fs::read_to_string("examples/messenger-primitives.axis").unwrap();
+        let formatted = roundtrip(&input);
+        assert!(
+            formatted.contains("IDEMPOTENCY header.idempotency_key SCOPE body.user_id TTL 86400")
+        );
+        assert!(formatted.contains("  UPSERT receipts"));
+        assert!(formatted.contains("  FANOUT recipient IN body.recipients"));
+        assert!(formatted.contains("  APPLIES_TO FLOW ALL"));
+        assert!(formatted.contains("    NOT PATH STARTS_WITH \"/internal\""));
+        assert!(
+            parse_ok(&formatted),
+            "formatted primitives example must re-parse"
+        );
     }
 }

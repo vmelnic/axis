@@ -1,4 +1,4 @@
-pub mod sql;
-pub mod rust;
-pub mod wasm;
 pub mod client;
+pub mod rust;
+pub mod sql;
+pub mod wasm;

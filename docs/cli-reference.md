@@ -29,6 +29,9 @@ axis --project my-api/
 ```
 
 Merges all `.axis` files in the directory (or `<dir>/src/` if it exists) and verifies cross-references.
+It can be combined with code-generation modes such as `--openapi`, `--sql`,
+`--rust`, and the client generators. Project formatting is intentionally
+rejected because one formatted stream cannot safely overwrite multiple files.
 
 ### --serve
 
@@ -71,10 +74,11 @@ axis --routes app.axis
 
 ### --openapi
 
-Generate OpenAPI 3.0 specification.
+Generate OpenAPI 3.1 specification.
 
 ```bash
 axis --openapi app.axis
+axis --project --openapi my-api/
 ```
 
 Outputs JSON. Includes all flows, request/response schemas, and auth requirements.

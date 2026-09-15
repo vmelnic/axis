@@ -43,7 +43,7 @@ Storage backend type:
 | Backend | Description | Status |
 |---------|-------------|--------|
 | `local` | Local filesystem | Fully implemented |
-| `s3` | S3-compatible object storage | Parsed, not yet implemented at runtime |
+| `s3` | AWS S3 or an S3-compatible object store | Fully implemented |
 
 ### BUCKET
 
@@ -62,7 +62,9 @@ Optional path prefix within the bucket. Files are stored under `{bucket}/{prefix
 | `public` | Files are served via HTTP at `/files/{bucket}/{prefix}/` |
 | `private` | Files are not publicly accessible |
 
-For local storage with public access, the runtime mounts a static file server at the appropriate path.
+For local storage with public access, the runtime mounts the bucket directory at `/files/{storage_name}`. The returned URL includes the optional prefix and generated filename.
+
+For public S3 storage, set `AXIS_STORAGE_<NAME>_PUBLIC_BASE_URL` (the storage name is uppercased and non-alphanumeric characters become `_`) or the shared `AXIS_S3_PUBLIC_BASE_URL`. Private S3 storage returns an `s3://bucket/key` locator.
 
 ### MAX_SIZE
 
@@ -70,7 +72,7 @@ Maximum file size in bytes. Optional -- if not set, no size limit is enforced.
 
 ### TYPES
 
-List of allowed MIME types. Optional -- if not set, all types are accepted.
+List of allowed MIME types or file extensions. Optional -- if not set, all types are accepted. Axis inspects known file signatures and does not rely solely on the client-provided filename or content type.
 
 ## Usage in Flows
 
@@ -116,12 +118,14 @@ BODY MULTIPART AvatarUpload
 
 The `BLOB` type represents binary file data.
 
-## Runtime Behavior (Local Backend)
+## Runtime Behavior
 
 1. A UUID-based filename is generated.
-2. The file is written to `{bucket}/{prefix}/{uuid_filename}`.
-3. For public storage, the file URL is `/files/{bucket}/{prefix}/{filename}`.
-4. For private storage, the relative path is returned.
+2. `MAX_SIZE` and `TYPES` are enforced before a write is attempted.
+3. Local files are written to `{bucket}/{prefix}/{uuid_filename}`. Public URLs use `/files/{storage_name}/{prefix}/{filename}`; private uploads return the relative key.
+4. S3 objects are written to `{prefix}/{uuid_filename}`. Public uploads return an HTTP URL and private uploads return `s3://bucket/key`.
+
+S3 uses the standard `AWS_*` environment variables understood by the AWS SDK ecosystem. `AWS_ENDPOINT_URL_S3` and `AWS_ALLOW_HTTP=true` support services such as MinIO during local development. See [Runtime](../runtime.md#file-storage) for response URL and request-limit configuration.
 
 ## Compiler Checks
 

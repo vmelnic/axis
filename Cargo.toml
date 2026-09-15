@@ -1,6 +1,6 @@
 [package]
 name = "axis"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Axis programming language compiler and runtime — a backend API language for small LLMs"
 license = "MIT"
@@ -15,7 +15,7 @@ miette = { version = "7", features = ["fancy"] }
 lsp-server = "0.7"
 lsp-types = "0.97"
 notify = "7"
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "mysql", "sqlite", "uuid", "chrono", "rust_decimal"] }
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
@@ -30,6 +30,9 @@ sha2 = "0.10"
 hex = "0.4"
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
+object_store = { version = "0.14", default-features = false, features = ["aws"] }
+infer = "0.19"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [features]
